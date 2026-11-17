@@ -53,8 +53,15 @@ class WeChatPlatform implements ClientPlatform {
   async openSocket(url: string): Promise<PlatformSocket> {
     const cloud = url.startsWith("cloud://");
     const task = cloud
-      ? wx.cloud.connectContainer({ path: "/ws" })
+      ? (
+          await wx.cloud.connectContainer({
+            config: { env: __CLOUD_ENV_ID__ },
+            service: url.slice("cloud://".length),
+            path: "/ws",
+          })
+        ).socketTask
       : wx.connectSocket({ url });
+    if (!task) throw new Error("云托管未返回 WebSocket 连接");
     return {
       send: (data) => task.send({ data }),
       close: () => task.close(),
