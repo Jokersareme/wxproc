@@ -1,0 +1,16 @@
+{
+  "name": "@friend-billiards/server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "start": "node dist/index.cjs",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.0.0",
+    "@friend-billiards/core": "0.1.0",
+    "@friend-billiards/protocol": "0.1.0",
+    "ws": "^8.18.3"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+.yarn/
+.pnp.*
+coverage/
+artifacts/
+release/
+**/dist/
+.env
+.env.*
+!.env.example
+project.private.config.json
+*.log
+*.tgz
+third_party/billiards.tar.gz
