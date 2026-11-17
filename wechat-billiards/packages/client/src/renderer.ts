@@ -461,9 +461,20 @@ export class TableRenderer {
       1.35 / Math.max(0.5, this.camera.aspect),
     );
     if (this.topView) {
-      this.camera.position.set(0, 0, 4.4 * aspectCompensation);
+      const dimensions = tableDimensions();
+      const halfFovTangent = Math.tan(
+        THREE.MathUtils.degToRad(this.camera.fov / 2),
+      );
+      const fitHeight = dimensions.outerHalfHeight / halfFovTangent;
+      const fitWidth =
+        dimensions.outerHalfWidth /
+        (halfFovTangent * this.camera.aspect);
+      const distance = Math.max(fitHeight, fitWidth) * 1.25;
+      this.camera.up.set(0, 1, 0);
+      this.camera.position.set(0, 0, distance);
       this.camera.lookAt(0, 0, 0);
     } else {
+      this.camera.up.set(0, 0, 1);
       this.camera.position.set(
         0,
         -2.65 * aspectCompensation,
