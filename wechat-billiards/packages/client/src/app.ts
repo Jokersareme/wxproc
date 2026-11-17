@@ -1,6 +1,7 @@
 import {
   hashSnapshot,
   MatchEngine,
+  tableDimensions,
   type GameType,
   type MatchSnapshot,
   type PlayerIndex,
@@ -18,7 +19,7 @@ export interface GameAppOptions {
   autoConnect?: boolean;
 }
 
-type Gesture = "aim" | "power" | "spin" | "place" | null;
+type Gesture = "aim" | "power" | "fineAim" | "spin" | "place" | null;
 
 export class GameApp {
   private readonly table: TableRenderer;
@@ -49,6 +50,7 @@ export class GameApp {
       power: 0.5,
       spinX: 0,
       spinY: 0,
+      fineAimOffset: 0,
       canShoot: false,
       online: false,
       sourceUrl: options.sourceUrl,
@@ -107,6 +109,11 @@ export class GameApp {
   }
 
   private redraw() {
+    if (
+      this.snapshot?.canRepositionCue &&
+      this.model.message === this.snapshot.lastMessage
+    )
+      this.model.message = undefined;
     this.model.snapshot = this.snapshot;
     this.model.room = this.room;
     this.model.roomCode = this.room?.roomCode;
@@ -130,7 +137,7 @@ export class GameApp {
       this.platform.width,
       this.platform.height,
     );
-    if (action === "power" || action === "spin") {
+    if (action === "power" || action === "fineAim" || action === "spin") {
       this.gesture = action;
       this.touchMove(point);
       return;
@@ -141,25 +148,43 @@ export class GameApp {
     }
     if (this.model.screen !== "game" || this.animating || !this.snapshot)
       return;
-    if (this.snapshot.phase === "ballInHand") this.gesture = "place";
-    else if (
-      this.snapshot.phase === "aiming" &&
-      (!this.onlineMatch || this.snapshot.currentPlayer === this.playerIndex)
-    )
-      this.gesture = "aim";
+    const myTurn =
+      !this.onlineMatch || this.snapshot.currentPlayer === this.playerIndex;
+    if (!myTurn) return;
+    if (this.snapshot.phase === "ballInHand") {
+      this.gesture = "place";
+      this.touchMove(point);
+    } else if (this.snapshot.phase === "aiming") {
+      const position = this.table.screenToTable(point.x, point.y);
+      const cue = this.snapshot.balls[0];
+      const nearCue =
+        Math.hypot(position.x - cue.pos[0], position.y - cue.pos[1]) <
+        tableDimensions().ballRadius * 3;
+      this.gesture =
+        this.snapshot.canRepositionCue && nearCue ? "place" : "aim";
+      if (this.gesture === "aim") this.aimAt(point);
+      else this.touchMove(point);
+    }
   }
 
   private touchMove(point: TouchPoint) {
     if (!this.gesture) return;
     if (this.gesture === "power") {
-      this.model.power = this.hud.powerAt(point.x);
+      this.model.power = this.hud.powerAt(point.y);
+    } else if (this.gesture === "fineAim" && this.lastPoint) {
+      const delta = ((point.y - this.lastPoint.y) * 720) / this.platform.height;
+      this.angle += delta * 0.0008;
+      this.model.fineAimOffset = Math.max(
+        -1,
+        Math.min(1, this.model.fineAimOffset + delta / 160),
+      );
+      this.table.setAim(this.angle, this.model.power);
     } else if (this.gesture === "spin") {
       const spin = this.hud.spinAt(point.x, point.y);
       this.model.spinX = spin.x;
       this.model.spinY = spin.y;
-    } else if (this.gesture === "aim" && this.lastPoint) {
-      this.angle += (point.x - this.lastPoint.x) * 0.006;
-      this.table.setAim(this.angle, this.model.power);
+    } else if (this.gesture === "aim") {
+      this.aimAt(point);
     } else if (this.gesture === "place" && this.snapshot) {
       const position = this.table.screenToTable(point.x, point.y);
       const preview = JSON.parse(
@@ -190,6 +215,7 @@ export class GameApp {
             position.y,
             this.playerIndex,
           );
+          this.model.message = this.snapshot.lastMessage ?? undefined;
           this.table.sync(this.snapshot);
         }
       } catch (error: any) {
@@ -199,7 +225,19 @@ export class GameApp {
     }
     this.gesture = null;
     this.lastPoint = undefined;
+    this.model.fineAimOffset = 0;
     this.redraw();
+  }
+
+  private aimAt(point: TouchPoint) {
+    if (!this.snapshot) return;
+    const position = this.table.screenToTable(point.x, point.y);
+    const cue = this.snapshot.balls[0];
+    const dx = position.x - cue.pos[0];
+    const dy = position.y - cue.pos[1];
+    if (Math.hypot(dx, dy) < 0.0001) return;
+    this.angle = Math.atan2(dy, dx);
+    this.table.setAim(this.angle, this.model.power);
   }
 
   private async action(action: string) {

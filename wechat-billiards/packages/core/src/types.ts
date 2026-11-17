@@ -33,6 +33,7 @@ export interface MatchSnapshot {
   version: 1;
   gameType: GameType;
   phase: MatchPhase;
+  canRepositionCue: boolean;
   practice: boolean;
   currentPlayer: PlayerIndex;
   players: [string, string];

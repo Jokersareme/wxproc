@@ -94,13 +94,27 @@ export class TableRenderer {
     const { width, height, pixelRatio } = this.platform;
     this.renderer.setPixelRatio(Math.min(pixelRatio, 2));
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / Math.max(1, height);
     this.updateCamera();
   }
 
   setTopView(value: boolean) {
     this.topView = value;
     this.updateCamera();
+  }
+
+  private tableViewport() {
+    const { width, height } = this.platform;
+    if (!this.topView) return { x: 0, y: 0, width, height };
+    const left = (width * 120) / 1280;
+    const right = (width * 120) / 1280;
+    const top = (height * 170) / 720;
+    const bottom = (height * 180) / 720;
+    return {
+      x: left,
+      y: top,
+      width: Math.max(1, width - left - right),
+      height: Math.max(1, height - top - bottom),
+    };
   }
 
   toggleCamera() {
@@ -162,15 +176,23 @@ export class TableRenderer {
         const mesh = this.ballMeshes[ball.id];
         if (!mesh || !before) return;
         mesh.visible = ball.state !== "InPocket";
-        mesh.position.set(
-          before.pos[0] + (ball.pos[0] - before.pos[0]) * alpha,
-          before.pos[1] + (ball.pos[1] - before.pos[1]) * alpha,
+        const x = before.pos[0] + (ball.pos[0] - before.pos[0]) * alpha;
+        const y = before.pos[1] + (ball.pos[1] - before.pos[1]) * alpha;
+        const z =
           before.pos[2] +
-            (ball.pos[2] - before.pos[2]) * alpha +
-            tableDimensions().ballRadius,
-        );
-        mesh.rotation.x += 0.04;
-        mesh.rotation.y += 0.025;
+          (ball.pos[2] - before.pos[2]) * alpha +
+          tableDimensions().ballRadius;
+        const dx = x - mesh.position.x;
+        const dy = y - mesh.position.y;
+        const distance = Math.hypot(dx, dy);
+        mesh.position.set(x, y, z);
+        if (distance > 0.0000001 && ball.state !== "InPocket") {
+          const axis = new THREE.Vector3(-dy, dx, 0).normalize();
+          mesh.rotateOnWorldAxis(
+            axis,
+            distance / tableDimensions().ballRadius,
+          );
+        }
       });
       this.platform.requestAnimationFrame(tick);
     };
@@ -189,9 +211,14 @@ export class TableRenderer {
       width: this.platform.width,
       height: this.platform.height,
     };
+    const viewport = this.tableViewport();
+    const canvasX =
+      ((x - rect.left) * this.platform.width) / Math.max(1, rect.width);
+    const canvasY =
+      ((y - rect.top) * this.platform.height) / Math.max(1, rect.height);
     const pointer = new THREE.Vector2(
-      ((x - rect.left) / rect.width) * 2 - 1,
-      -((y - rect.top) / rect.height) * 2 + 1,
+      ((canvasX - viewport.x) / viewport.width) * 2 - 1,
+      -((canvasY - viewport.y) / viewport.height) * 2 + 1,
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(pointer, this.camera);
@@ -204,9 +231,26 @@ export class TableRenderer {
   }
 
   render() {
+    const { width, height } = this.platform;
     this.renderer.autoClear = false;
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, width, height);
     this.renderer.clear();
+    if (this.topView) {
+      const viewport = this.tableViewport();
+      const bottom = height - viewport.y - viewport.height;
+      this.renderer.setViewport(
+        viewport.x,
+        bottom,
+        viewport.width,
+        viewport.height,
+      );
+      this.renderer.setScissor(viewport.x, bottom, viewport.width, viewport.height);
+      this.renderer.setScissorTest(true);
+    }
     this.renderer.render(this.scene, this.camera);
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, width, height);
   }
 
   private buildLights() {
@@ -225,58 +269,6 @@ export class TableRenderer {
   private buildTable() {
     this.tableGroup.clear();
     const d = tableDimensions();
-    const cloth = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        d.outerHalfWidth * 2,
-        d.outerHalfHeight * 2,
-        d.ballRadius * 0.45,
-      ),
-      new THREE.MeshStandardMaterial({
-        color: 0x087552,
-        roughness: 0.9,
-        metalness: 0,
-      }),
-    );
-    cloth.position.z = -d.ballRadius * 0.25;
-    cloth.receiveShadow = true;
-    this.tableGroup.add(cloth);
-    const wood = new THREE.MeshStandardMaterial({
-      color: 0x4c2415,
-      roughness: 0.42,
-      metalness: 0.08,
-    });
-    const railHeight = d.ballRadius * 1.1;
-    const railWidth = d.ballRadius * 2.8;
-    const horizontal = new THREE.BoxGeometry(
-      d.outerHalfWidth * 2 + railWidth * 2,
-      railWidth,
-      railHeight,
-    );
-    const vertical = new THREE.BoxGeometry(
-      railWidth,
-      d.outerHalfHeight * 2,
-      railHeight,
-    );
-    [-1, 1].forEach((side) => {
-      const top = new THREE.Mesh(horizontal, wood);
-      top.position.set(
-        0,
-        side * (d.outerHalfHeight + railWidth / 2),
-        railHeight / 2,
-      );
-      this.tableGroup.add(top);
-      const end = new THREE.Mesh(vertical, wood);
-      end.position.set(
-        side * (d.outerHalfWidth + railWidth / 2),
-        0,
-        railHeight / 2,
-      );
-      this.tableGroup.add(end);
-    });
-    const pocketMaterial = new THREE.MeshStandardMaterial({
-      color: 0x010303,
-      roughness: 1,
-    });
     const pocketRadius = d.ballRadius * 1.75;
     const pockets = [
       [-d.outerHalfWidth, -d.outerHalfHeight],
@@ -286,20 +278,178 @@ export class TableRenderer {
       [0, d.outerHalfHeight],
       [d.outerHalfWidth, d.outerHalfHeight],
     ];
+    const clothShape = new THREE.Shape();
+    clothShape.moveTo(-d.outerHalfWidth, -d.outerHalfHeight);
+    clothShape.lineTo(d.outerHalfWidth, -d.outerHalfHeight);
+    clothShape.lineTo(d.outerHalfWidth, d.outerHalfHeight);
+    clothShape.lineTo(-d.outerHalfWidth, d.outerHalfHeight);
+    clothShape.closePath();
     pockets.forEach(([x, y]) => {
-      const pocket = new THREE.Mesh(
+      const hole = new THREE.Path();
+      hole.absarc(x, y, pocketRadius, 0, Math.PI * 2, true);
+      clothShape.holes.push(hole);
+    });
+    const clothDepth = d.ballRadius * 0.45;
+    const cloth = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(clothShape, {
+        depth: clothDepth,
+        bevelEnabled: false,
+        curveSegments: 32,
+      }),
+      new THREE.MeshStandardMaterial({
+        color: 0x087552,
+        roughness: 0.9,
+        metalness: 0,
+      }),
+    );
+    cloth.position.z = -clothDepth;
+    cloth.receiveShadow = true;
+    this.tableGroup.add(cloth);
+
+    const pocketMaterial = new THREE.MeshStandardMaterial({
+      color: 0x010303,
+      roughness: 1,
+      side: THREE.DoubleSide,
+    });
+    const leather = new THREE.MeshStandardMaterial({
+      color: 0x17110d,
+      roughness: 0.82,
+    });
+    const cupDepth = d.ballRadius * 3.2;
+    pockets.forEach(([x, y]) => {
+      const cup = new THREE.Mesh(
         new THREE.CylinderGeometry(
-          pocketRadius,
-          pocketRadius * 0.85,
-          0.035,
-          32,
+          pocketRadius * 0.98,
+          pocketRadius * 0.76,
+          cupDepth,
+          40,
+          1,
+          true,
         ),
         pocketMaterial,
       );
-      pocket.rotation.x = Math.PI / 2;
-      pocket.position.set(x, y, 0.005);
-      this.tableGroup.add(pocket);
+      cup.rotation.x = Math.PI / 2;
+      cup.position.set(x, y, -cupDepth / 2);
+      cup.receiveShadow = true;
+      this.tableGroup.add(cup);
+      const bottom = new THREE.Mesh(
+        new THREE.CircleGeometry(pocketRadius * 0.77, 40),
+        pocketMaterial,
+      );
+      bottom.position.set(x, y, -cupDepth);
+      this.tableGroup.add(bottom);
+      const lip = new THREE.Mesh(
+        new THREE.RingGeometry(pocketRadius * 0.93, pocketRadius * 1.12, 40),
+        leather,
+      );
+      lip.position.set(x, y, 0.002);
+      lip.receiveShadow = true;
+      this.tableGroup.add(lip);
     });
+
+    const wood = new THREE.MeshStandardMaterial({
+      color: 0x4c2415,
+      roughness: 0.42,
+      metalness: 0.08,
+    });
+    const cushion = new THREE.MeshStandardMaterial({
+      color: 0x075c41,
+      roughness: 0.78,
+    });
+    const railHeight = d.ballRadius * 1.1;
+    const railWidth = d.ballRadius * 2.8;
+    const cushionWidth = railWidth * 0.32;
+    const cornerGap = pocketRadius * 1.03;
+    const sideGap = pocketRadius * 0.9;
+    const horizontalLength = d.outerHalfWidth - cornerGap - sideGap;
+    const horizontalCenter = (d.outerHalfWidth - cornerGap + sideGap) / 2;
+    const verticalLength = (d.outerHalfHeight - cornerGap) * 2;
+    const horizontalRail = new THREE.BoxGeometry(
+      horizontalLength,
+      railWidth,
+      railHeight,
+    );
+    const horizontalCushion = new THREE.BoxGeometry(
+      horizontalLength,
+      cushionWidth,
+      railHeight * 0.72,
+    );
+    const verticalRail = new THREE.BoxGeometry(
+      railWidth,
+      verticalLength,
+      railHeight,
+    );
+    const verticalCushion = new THREE.BoxGeometry(
+      cushionWidth,
+      verticalLength,
+      railHeight * 0.72,
+    );
+    const jawGeometry = new THREE.SphereGeometry(
+      pocketRadius * 0.34,
+      20,
+      12,
+    );
+
+    [-1, 1].forEach((side) => {
+      [-1, 1].forEach((segment) => {
+        const x = segment * horizontalCenter;
+        const y = side * (d.outerHalfHeight + railWidth / 2);
+        const rail = new THREE.Mesh(horizontalRail, wood);
+        rail.position.set(x, y, railHeight / 2);
+        rail.castShadow = true;
+        rail.receiveShadow = true;
+        this.tableGroup.add(rail);
+        const rubber = new THREE.Mesh(horizontalCushion, cushion);
+        rubber.position.set(
+          x,
+          side * (d.outerHalfHeight - cushionWidth * 0.15),
+          railHeight * 0.4,
+        );
+        rubber.receiveShadow = true;
+        this.tableGroup.add(rubber);
+        [-1, 1].forEach((end) => {
+          const jaw = new THREE.Mesh(jawGeometry, cushion);
+          jaw.scale.set(1.35, 0.8, 0.72);
+          jaw.position.set(
+            x + end * horizontalLength / 2,
+            side * (d.outerHalfHeight - cushionWidth * 0.1),
+            railHeight * 0.4,
+          );
+          jaw.castShadow = true;
+          this.tableGroup.add(jaw);
+        });
+      });
+
+      const endRail = new THREE.Mesh(verticalRail, wood);
+      endRail.position.set(
+        side * (d.outerHalfWidth + railWidth / 2),
+        0,
+        railHeight / 2,
+      );
+      endRail.castShadow = true;
+      endRail.receiveShadow = true;
+      this.tableGroup.add(endRail);
+      const endCushion = new THREE.Mesh(verticalCushion, cushion);
+      endCushion.position.set(
+        side * (d.outerHalfWidth - cushionWidth * 0.15),
+        0,
+        railHeight * 0.4,
+      );
+      endCushion.receiveShadow = true;
+      this.tableGroup.add(endCushion);
+      [-1, 1].forEach((end) => {
+        const jaw = new THREE.Mesh(jawGeometry, cushion);
+        jaw.scale.set(0.8, 1.35, 0.72);
+        jaw.position.set(
+          side * (d.outerHalfWidth - cushionWidth * 0.1),
+          end * verticalLength / 2,
+          railHeight * 0.4,
+        );
+        jaw.castShadow = true;
+        this.tableGroup.add(jaw);
+      });
+    });
+
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(20, 20),
       new THREE.MeshStandardMaterial({ color: 0x071c18, roughness: 1 }),
@@ -456,6 +606,8 @@ export class TableRenderer {
   }
 
   private updateCamera() {
+    const viewport = this.tableViewport();
+    this.camera.aspect = viewport.width / Math.max(1, viewport.height);
     const aspectCompensation = Math.max(
       1,
       1.35 / Math.max(0.5, this.camera.aspect),

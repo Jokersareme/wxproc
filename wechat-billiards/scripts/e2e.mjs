@@ -148,6 +148,34 @@ try {
   const retry = await host.wait((m) => m.type === "shot", retryStart);
   if (retry.stateHash !== hostShot.stateHash || retry.seq !== hostShot.seq)
     throw new Error("幂等重试返回了新对局状态");
+  if (
+    hostShot.snapshot.phase !== "ballInHand" ||
+    !hostShot.snapshot.canRepositionCue
+  )
+    throw new Error("验收杆未产生自由球");
+
+  const firstPlacement = await guest.request(
+    { type: "placeBall", matchId, x: -0.5, y: 0 },
+    (m) => m.type === "room" && m.snapshot.phase === "aiming",
+  );
+  if (!firstPlacement.snapshot.canRepositionCue)
+    throw new Error("首次摆放后自由球资格被提前清除");
+  const hostPlacementStart = host.messages.length;
+  const secondPlacement = await guest.request(
+    { type: "placeBall", matchId, x: -0.55, y: 0.05 },
+    (m) =>
+      m.type === "room" &&
+      m.snapshot.phase === "aiming" &&
+      Math.abs(m.snapshot.balls[0].pos[0] + 0.55) < 0.00001,
+  );
+  if (!secondPlacement.snapshot.canRepositionCue)
+    throw new Error("重复摆放后自由球资格丢失");
+  const secondPlacementOnHost = await host.wait(
+    (m) => m.type === "room" && m.seq === secondPlacement.seq,
+    hostPlacementStart,
+  );
+  if (secondPlacementOnHost.stateHash !== secondPlacement.stateHash)
+    throw new Error("双客户端重复摆球状态不一致");
 
   host.close();
   guest.close();
@@ -165,10 +193,11 @@ try {
     (m) => m.type === "room",
   );
   if (
-    restored.stateHash !== hostShot.stateHash ||
-    restored.snapshot.shotNumber !== 1
+    restored.stateHash !== secondPlacement.stateHash ||
+    restored.snapshot.shotNumber !== 1 ||
+    !restored.snapshot.canRepositionCue
   )
-    throw new Error("服务重启后未恢复权威快照");
+    throw new Error("服务重启后未恢复权威快照或自由球资格");
 
   const reconnectedGuest = new Client();
   await reconnectedGuest.connect(restartedPort);
@@ -203,10 +232,11 @@ try {
           "turn-authority",
           "dual-shot",
           "idempotency",
+          "repeat-ball-in-hand",
           "restart-restore",
           "concede",
         ],
-        stateHash: hostShot.stateHash,
+        stateHash: secondPlacement.stateHash,
       },
       null,
       2,

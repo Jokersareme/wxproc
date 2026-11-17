@@ -81,11 +81,46 @@ describe("rule boundaries", () => {
     expect(engine.legalTargetBallIds()).toEqual([4]);
   });
 
-  it("accepts a legal cue-ball placement and resumes aiming", () => {
+  it("accepts repeated cue-ball placement during ball in hand and after restore", () => {
     const engine = new MatchEngine({ gameType: "eightball" });
     engine.state.phase = "ballInHand";
-    engine.placeCueBall(-0.5, 0);
-    expect(engine.state.phase).toBe("aiming");
-    expect(engine.table.cueball.pos.x).toBe(-0.5);
+    engine.state.canRepositionCue = true;
+    const placed = engine.placeCueBall(-0.5, 0);
+    expect(placed.phase).toBe("aiming");
+    expect(placed.canRepositionCue).toBe(true);
+    expect(placed.lastMessage).toContain("任意球");
+
+    const restored = MatchEngine.restore(placed);
+    const repositioned = restored.placeCueBall(-0.55, 0.05);
+    expect(repositioned.canRepositionCue).toBe(true);
+    expect(restored.table.cueball.pos.x).toBeCloseTo(-0.55, 6);
+    expect(restored.table.cueball.pos.y).toBeCloseTo(0.05, 6);
+    expect(() => restored.placeCueBall(20, 20)).toThrow("超出允许区域");
+    expect(restored.state.canRepositionCue).toBe(true);
+
+    restored.state.shotNumber = 1;
+    const shot = restored.shoot({
+      angle: 0,
+      power: 0.5,
+      spinX: 0,
+      spinY: 0,
+      elevation: 0,
+    });
+    expect(shot.snapshot.canRepositionCue).toBe(false);
+    expect(() => restored.placeCueBall(-0.4, 0)).toThrow("当前没有自由球");
+  });
+
+  it("rejects cue-ball placement in an ordinary turn", () => {
+    const engine = new MatchEngine({ gameType: "eightball" });
+    expect(engine.state.canRepositionCue).toBe(false);
+    expect(() => engine.placeCueBall(-0.5, 0)).toThrow("当前没有自由球");
+  });
+
+  it("restores ball in hand from a legacy snapshot", () => {
+    const engine = new MatchEngine({ gameType: "eightball" });
+    const legacy = engine.snapshot() as any;
+    legacy.phase = "ballInHand";
+    delete legacy.canRepositionCue;
+    expect(MatchEngine.restore(legacy).state.canRepositionCue).toBe(true);
   });
 });

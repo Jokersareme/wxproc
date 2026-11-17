@@ -87,6 +87,8 @@ export class MatchEngine {
   constructor(options: CreateMatchOptions | MatchSnapshot) {
     if ("gameType" in options && "version" in options) {
       this.state = cloneSnapshot(options as MatchSnapshot);
+      this.state.canRepositionCue =
+        options.canRepositionCue ?? options.phase === "ballInHand";
       this.configure();
       Ball.id = 0;
       const balls = this.state.balls.map((data) => {
@@ -118,6 +120,7 @@ export class MatchEngine {
       version: 1,
       gameType,
       phase: "aiming",
+      canRepositionCue: false,
       practice: options.practice ?? false,
       currentPlayer: 0,
       players: options.playerNames ?? ["玩家 1", "玩家 2"],
@@ -164,6 +167,7 @@ export class MatchEngine {
     if (player !== this.state.currentPlayer) throw new Error("还未轮到你");
     if (!this.table.cueball.onTable()) throw new Error("请先摆放母球");
 
+    this.state.canRepositionCue = false;
     this.configure();
     const input = normaliseShot(rawInput);
     const isBreak = this.state.shotNumber === 0;
@@ -226,7 +230,10 @@ export class MatchEngine {
   }
 
   placeCueBall(x: number, y: number, player = this.state.currentPlayer) {
-    if (this.state.phase !== "ballInHand") throw new Error("当前没有自由球");
+    const canPlace =
+      this.state.phase === "ballInHand" ||
+      (this.state.phase === "aiming" && this.state.canRepositionCue);
+    if (!canPlace) throw new Error("当前没有自由球");
     if (player !== this.state.currentPlayer) throw new Error("还未轮到你");
     if (!Number.isFinite(x) || !Number.isFinite(y))
       throw new Error("母球位置无效");
@@ -241,7 +248,8 @@ export class MatchEngine {
     cueball.rvel.set(0, 0, 0);
     cueball.state = State.Stationary;
     this.state.phase = "aiming";
-    this.state.lastMessage = "母球已摆放";
+    this.state.canRepositionCue = true;
+    this.state.lastMessage = "任意球：母球已摆放，可继续拖动调整";
     return this.snapshot();
   }
 
@@ -748,6 +756,7 @@ export class MatchEngine {
     cueball.pos.z = 0;
     cueball.state = State.Stationary;
     this.state.phase = "ballInHand";
+    this.state.canRepositionCue = true;
     events.push({ type: "ballInHand", player: this.state.currentPlayer });
   }
 
@@ -760,6 +769,7 @@ export class MatchEngine {
     this.state.endReason = reason;
     this.state.lastMessage = reason;
     this.state.phase = "gameOver";
+    this.state.canRepositionCue = false;
     events.push({ type: "gameOver", winner, reason });
     return events;
   }

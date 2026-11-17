@@ -5,6 +5,9 @@ import type { ClientPlatform } from "./platform";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
+const SLIDER_TOP = 190;
+const SLIDER_HEIGHT = 320;
+const FINE_AIM_TRAVEL = SLIDER_HEIGHT / 2;
 
 export interface HudModel {
   screen: "home" | "friend" | "room" | "game" | "license";
@@ -17,6 +20,7 @@ export interface HudModel {
   power: number;
   spinX: number;
   spinY: number;
+  fineAimOffset: number;
   canShoot: boolean;
   online: boolean;
   sourceUrl: string;
@@ -107,9 +111,12 @@ export class Hud {
     return button && !button.disabled ? button.id : null;
   }
 
-  powerAt(x: number): number {
-    const logicalX = (x / (this.lastScreenWidth || WIDTH)) * WIDTH;
-    return Math.max(0.03, Math.min(1, (logicalX - 350) / 400));
+  powerAt(y: number): number {
+    const logicalY = (y / (this.lastScreenHeight || HEIGHT)) * HEIGHT;
+    return Math.max(
+      0.03,
+      Math.min(1, 1 - (logicalY - SLIDER_TOP) / SLIDER_HEIGHT),
+    );
   }
 
   spinAt(x: number, y: number): { x: number; y: number } {
@@ -323,7 +330,7 @@ export class Hud {
         ? this.snookerTarget(snapshot)
         : `第 ${snapshot.shotNumber + 1} 杆`;
     this.text(target, 420, 63, 19, "#d4e9df");
-    this.button("exit", "退出", 1126, 30, 108, 52);
+    this.button("exit", "退出", 870, 30, 108, 52);
     this.button("camera", "视角", 1034, 624, 90, 56);
     this.button("sound", "音效", 1136, 624, 90, 56);
     this.panel(24, 560, 232, 138, 0.68);
@@ -351,21 +358,46 @@ export class Hud {
       width: 120,
       height: 120,
     });
-    this.text("力度", 304, 596, 18, "#b7d7cb");
-    this.panel(350, 626, 400, 24, 0.8);
+
+    const sliderBottom = SLIDER_TOP + SLIDER_HEIGHT;
+    const powerY = sliderBottom - model.power * SLIDER_HEIGHT;
+    this.text("力度", 63, 164, 18, "#b7d7cb", "center");
+    this.panel(50, SLIDER_TOP, 26, SLIDER_HEIGHT, 0.8);
     this.context.fillStyle = "#e5b85d";
-    this.context.fillRect(350, 626, 400 * model.power, 24);
+    this.context.fillRect(50, powerY, 26, sliderBottom - powerY);
     this.context.fillStyle = "#ffffff";
-    this.context.fillRect(350 + 400 * model.power - 3, 616, 6, 44);
+    this.context.fillRect(40, powerY - 4, 46, 8);
+    this.text(`${Math.round(model.power * 100)}%`, 63, 540, 20, "#ffffff", "center");
     this.buttons.push({
       id: "power",
       label: "",
-      x: 330,
-      y: 596,
-      width: 440,
-      height: 86,
+      x: 28,
+      y: SLIDER_TOP - 12,
+      width: 72,
+      height: SLIDER_HEIGHT + 24,
+      disabled: !model.canShoot,
     });
-    this.text(`${Math.round(model.power * 100)}%`, 766, 647, 20, "#ffffff");
+
+    const fineAimY =
+      SLIDER_TOP + FINE_AIM_TRAVEL + model.fineAimOffset * FINE_AIM_TRAVEL;
+    this.text("微调", 1209, 164, 18, "#b7d7cb", "center");
+    this.panel(1196, SLIDER_TOP, 26, SLIDER_HEIGHT, 0.8);
+    this.context.fillStyle = "rgba(158, 216, 193, 0.45)";
+    this.context.fillRect(1207, SLIDER_TOP + 8, 4, SLIDER_HEIGHT - 16);
+    this.context.fillStyle = "#f4d99b";
+    this.context.fillRect(1185, fineAimY - 4, 48, 8);
+    this.text("+", 1209, SLIDER_TOP + 18, 18, "#ffffff", "center");
+    this.text("−", 1209, sliderBottom - 18, 18, "#ffffff", "center");
+    this.buttons.push({
+      id: "fineAim",
+      label: "",
+      x: 1172,
+      y: SLIDER_TOP - 12,
+      width: 74,
+      height: SLIDER_HEIGHT + 24,
+      disabled: !model.canShoot,
+    });
+
     this.button(
       "shoot",
       snapshot.phase === "ballInHand" ? "先摆母球" : "击球",
@@ -381,11 +413,13 @@ export class Hud {
     }
     const status =
       model.message ??
-      snapshot.lastMessage ??
       (snapshot.phase === "ballInHand"
-        ? "拖动母球到合法位置"
-        : "拖动台面瞄准，调整力度和杆法");
-    this.panel(304, 112, 672, 48, 0.62);
+        ? "任意球：拖动白球到合法位置"
+        : snapshot.canRepositionCue
+          ? "任意球：可拖动白球调整，或点击台面瞄准"
+          : (snapshot.lastMessage ??
+            "单击台面瞄准，拖动粗瞄，右侧微调"));
+    this.panel(280, 112, 720, 48, 0.62);
     this.text(status, 640, 144, 19, "#f1e5bd", "center");
     if (snapshot.phase === "gameOver") this.drawGameOver(model);
   }
