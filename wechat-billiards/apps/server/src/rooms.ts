@@ -34,6 +34,10 @@ function send(socket: SocketLike, message: ServerMessage) {
   socket.send(JSON.stringify(message));
 }
 
+function normalisePredictionLevel(value: number): number {
+  return Number.isInteger(value) && value >= 0 && value <= 5 ? value : 0;
+}
+
 export class RoomService {
   private readonly rooms = new Map<string, ActiveRoom>();
   private readonly matches = new Map<string, string>();
@@ -154,7 +158,7 @@ export class RoomService {
       inviteToken,
       matchId,
       gameType,
-      predictionLevel,
+      predictionLevel: normalisePredictionLevel(predictionLevel),
       status: "waiting",
       players: [
         {
@@ -445,12 +449,7 @@ export class RoomService {
   }
 
   private install(record: RoomRecord): ActiveRoom {
-    if (
-      !Number.isInteger(record.predictionLevel) ||
-      record.predictionLevel < 1 ||
-      record.predictionLevel > 5
-    )
-      record.predictionLevel = 1;
+    record.predictionLevel = normalisePredictionLevel(record.predictionLevel);
     const engine = MatchEngine.restore(record.snapshot);
     const room: ActiveRoom = {
       record,

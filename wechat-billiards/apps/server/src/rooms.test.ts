@@ -29,7 +29,7 @@ const shotInput = { angle: 0, power: 0.3, spinX: 0, spinY: 0, elevation: 0 };
 
 async function createPlayingRoom(
   service: RoomService,
-  predictionLevel = 1,
+  predictionLevel = 0,
 ) {
   const host = context("host", "房主");
   const guest = context("guest", "球友");
@@ -193,10 +193,11 @@ describe("authoritative room service", () => {
     expect(reconnect.socket.last("room").room.predictionLevel).toBe(4);
   });
 
-  it("defaults old rooms without a prediction level to level 1", async () => {
+  it("defaults new and old rooms to prediction level 0", async () => {
     const repository = new MemoryRoomRepository();
     const service = new RoomService(repository);
     const { room } = await createPlayingRoom(service);
+    expect(room.predictionLevel).toBe(0);
     for (const record of repository.records.values()) {
       delete (record as any).predictionLevel;
     }
@@ -208,7 +209,7 @@ describe("authoritative room service", () => {
       type: "sync",
       matchId: room.matchId,
     });
-    expect(socket.socket.last("room").room.predictionLevel).toBe(1);
+    expect(socket.socket.last("room").room.predictionLevel).toBe(0);
   });
 
   it("rejects a wrong invite token", async () => {

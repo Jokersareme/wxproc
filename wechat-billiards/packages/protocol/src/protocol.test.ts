@@ -30,21 +30,23 @@ describe("protocol validation", () => {
     ).toThrow();
   });
 
-  it("defaults the prediction level and rejects invalid levels", () => {
+  it("defaults the prediction level to off and rejects invalid levels", () => {
     const defaulted = parseClientMessage({
       ...base,
       type: "createRoom",
       gameType: "eightball",
     }) as any;
-    expect(defaulted.predictionLevel).toBe(1);
-    const enabled = parseClientMessage({
-      ...base,
-      type: "createRoom",
-      gameType: "nineball",
-      predictionLevel: 5,
-    }) as any;
-    expect(enabled.predictionLevel).toBe(5);
-    for (const predictionLevel of [0, 6, 2.5, "3"]) {
+    expect(defaulted.predictionLevel).toBe(0);
+    for (const predictionLevel of [0, 1, 5]) {
+      const accepted = parseClientMessage({
+        ...base,
+        type: "createRoom",
+        gameType: "nineball",
+        predictionLevel,
+      }) as any;
+      expect(accepted.predictionLevel).toBe(predictionLevel);
+    }
+    for (const predictionLevel of [-1, 6, 2.5, "3"]) {
       expect(() =>
         parseClientMessage({
           ...base,

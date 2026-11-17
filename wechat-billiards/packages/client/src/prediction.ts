@@ -24,9 +24,9 @@ export function predictionLengthForLevel(
   level: number,
   outerHalfWidth: number,
 ): number {
-  if (!Number.isFinite(level) || level <= 1) return 0;
-  const quarter = Math.min(4, Math.floor(level) - 1);
-  return (maxPredictionLength(outerHalfWidth) * quarter) / 4;
+  if (!Number.isFinite(level) || level <= 0) return 0;
+  const steps = Math.min(5, Math.floor(level));
+  return (maxPredictionLength(outerHalfWidth) * steps) / 5;
 }
 
 /**

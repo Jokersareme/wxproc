@@ -147,10 +147,10 @@ export function parseClientMessage(value: unknown): ClientMessage {
       )
         throw new Error("玩法无效");
       const predictionLevel =
-        value.predictionLevel === undefined ? 1 : value.predictionLevel;
+        value.predictionLevel === undefined ? 0 : value.predictionLevel;
       if (
         !Number.isInteger(predictionLevel) ||
-        (predictionLevel as number) < 1 ||
+        (predictionLevel as number) < 0 ||
         (predictionLevel as number) > 5
       )
         throw new Error("预测线档位无效");

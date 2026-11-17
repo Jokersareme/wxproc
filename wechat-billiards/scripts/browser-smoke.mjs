@@ -92,6 +92,11 @@ async function screenshot(path) {
   const result = await cdp("Page.captureScreenshot", { format: "png" });
   await writeFile(path, Buffer.from(result.data, "base64"));
 }
+async function buttonCentre(id) {
+  return evaluate(
+    `(()=>{const b=billiards.hud.buttons.find(c=>c.id===${JSON.stringify(id)});return b?{x:b.x+b.width/2,y:b.y+b.height/2}:null;})()`,
+  );
+}
 
 const TABLE_CENTRE = { x: 640, y: 405 };
 const SPIN_BUTTON = { x: 87, y: 660 };
@@ -236,12 +241,16 @@ try {
   )
     throw new Error(`滑条未应用到击球：${JSON.stringify(rolling)}`);
   if (
-    Math.abs(rolling.shotInput.spinX - spin.x) > 0.000001 ||
-    Math.abs(rolling.shotInput.spinY - spin.y) > 0.000001 ||
+    Math.abs(rolling.shotInput.spinX + spin.x) > 0.000001 ||
+    Math.abs(rolling.shotInput.spinY + spin.y) > 0.000001 ||
+    rolling.shotInput.spinX >= 0 ||
+    rolling.shotInput.spinY >= 0 ||
     rolling.spinX !== 0 ||
     rolling.spinY !== 0
   )
-    throw new Error(`当次杆法未保留或击球后未归中：${JSON.stringify(rolling)}`);
+    throw new Error(
+      `显示杆法与物理输入符号未取反或击球后未归中：${JSON.stringify({ spin, rolling })}`,
+    );
   await screenshot("artifacts/eightball-after-shot.png");
 
   const freeBallPhase = await evaluate(
@@ -307,13 +316,14 @@ try {
   await screenshot("artifacts/eightball-ball-in-hand.png");
 
   const prediction = await evaluate(
-    "(()=>{const cue=billiards.snapshot.balls[0].pos;const target=billiards.snapshot.balls.find(b=>b.id!==0&&b.state!=='InPocket');const dx=target.pos[0]-cue[0];const dy=target.pos[1]-cue[1];const radius=billiards.table.ballMeshes[1].geometry.parameters.radius;const base=Math.atan2(dy,dx);const angle=base+Math.asin((radius*0.8)/Math.hypot(dx,dy));const max=2*(radius*44)/3;const length=(segment)=>segment?Math.hypot(segment[1].x-segment[0].x,segment[1].y-segment[0].y):0;const points=(geometry)=>geometry.attributes.position?.count??0;const state=()=>{const segments=billiards.table.predictionSegments();return {normalVisible:billiards.table.predictionNormalLine.visible,tangentVisible:billiards.table.predictionTangentLine.visible,normalPoints:points(billiards.table.predictionNormalGeometry),tangentPoints:points(billiards.table.predictionTangentGeometry),debugNormal:segments.normal,debugTangent:segments.tangent};};billiards.table.setPredictionLevel(5);billiards.table.setAim(angle,0.5);const five=billiards.table.predictionSegments();const fiveState=state();billiards.table.setPredictionLevel(3);const three=billiards.table.predictionSegments();const threeState=state();billiards.table.setPredictionLevel(1);const one=billiards.table.predictionSegments();const oneState=state();billiards.table.setPredictionLevel(5);const fiveAgainState=state();billiards.table.setAim(base,0.5);const straightState=state();const straightTangent=billiards.table.predictionSegments().tangent;billiards.table.setAim(angle,0.5);const obliqueAgainState=state();return {max,fiveNormal:length(five.normal),fiveTangent:length(five.tangent),threeNormal:length(three.normal),oneNormal:one.normal,fiveState,threeState,oneState,fiveAgainState,straightState,straightTangent,obliqueAgainState};})()",
+    "(()=>{const cue=billiards.snapshot.balls[0].pos;const target=billiards.snapshot.balls.find(b=>b.id!==0&&b.state!=='InPocket');const dx=target.pos[0]-cue[0];const dy=target.pos[1]-cue[1];const radius=billiards.table.ballMeshes[1].geometry.parameters.radius;const base=Math.atan2(dy,dx);const angle=base+Math.asin((radius*0.8)/Math.hypot(dx,dy));const max=2*(radius*44)/3;const length=(segment)=>segment?Math.hypot(segment[1].x-segment[0].x,segment[1].y-segment[0].y):0;const points=(geometry)=>geometry.attributes.position?.count??0;const state=()=>{const segments=billiards.table.predictionSegments();return {normalVisible:billiards.table.predictionNormalLine.visible,tangentVisible:billiards.table.predictionTangentLine.visible,normalPoints:points(billiards.table.predictionNormalGeometry),tangentPoints:points(billiards.table.predictionTangentGeometry),debugNormal:segments.normal,debugTangent:segments.tangent};};billiards.table.setPredictionLevel(5);billiards.table.setAim(angle,0.5);const five=billiards.table.predictionSegments();const fiveState=state();billiards.table.setPredictionLevel(3);const three=billiards.table.predictionSegments();const threeState=state();billiards.table.setPredictionLevel(1);const one=billiards.table.predictionSegments();const oneState=state();billiards.table.setPredictionLevel(0);const zero=billiards.table.predictionSegments();const zeroState=state();billiards.table.setPredictionLevel(5);const fiveAgainState=state();billiards.table.setAim(base,0.5);const straightState=state();const straightTangent=billiards.table.predictionSegments().tangent;billiards.table.setAim(angle,0.5);const obliqueAgainState=state();return {max,fiveNormal:length(five.normal),fiveTangent:length(five.tangent),threeNormal:length(three.normal),oneNormal:length(one.normal),zeroNormal:zero.normal,fiveState,threeState,oneState,zeroState,fiveAgainState,straightState,straightTangent,obliqueAgainState};})()",
   );
   if (
     !prediction ||
     Math.abs(prediction.fiveNormal - prediction.max) > 0.00001 ||
-    Math.abs(prediction.threeNormal - prediction.max / 2) > 0.00001 ||
-    prediction.oneNormal !== null
+    Math.abs(prediction.threeNormal - (prediction.max * 3) / 5) > 0.00001 ||
+    Math.abs(prediction.oneNormal - prediction.max / 5) > 0.00001 ||
+    prediction.zeroNormal !== null
   )
     throw new Error(`预测线档位长度错误：${JSON.stringify(prediction)}`);
   if (prediction.fiveTangent <= 0)
@@ -337,18 +347,24 @@ try {
     !prediction.threeState.normalVisible ||
     !prediction.threeState.tangentVisible ||
     prediction.threeState.normalPoints !== 2 ||
-    prediction.threeState.tangentPoints !== 2
+    prediction.threeState.tangentPoints !== 2 ||
+    !prediction.oneState.normalVisible ||
+    !prediction.oneState.tangentVisible ||
+    prediction.oneState.normalPoints !== 2 ||
+    prediction.oneState.tangentPoints !== 2
   )
     throw new Error(
       `预测线切换档位后几何丢失：${JSON.stringify(prediction)}`,
     );
   if (
-    prediction.oneState.normalVisible ||
-    prediction.oneState.tangentVisible ||
-    prediction.oneState.debugNormal !== null ||
-    prediction.oneState.debugTangent !== null
+    prediction.zeroState.normalVisible ||
+    prediction.zeroState.tangentVisible ||
+    prediction.zeroState.debugNormal !== null ||
+    prediction.zeroState.debugTangent !== null ||
+    prediction.zeroState.normalPoints !== 2 ||
+    prediction.zeroState.tangentPoints !== 2
   )
-    throw new Error(`预测线 1 档未隐藏：${JSON.stringify(prediction.oneState)}`);
+    throw new Error(`预测线 0 档未隐藏：${JSON.stringify(prediction.zeroState)}`);
   if (
     !prediction.fiveAgainState.normalVisible ||
     !prediction.fiveAgainState.tangentVisible ||
@@ -358,7 +374,7 @@ try {
     prediction.fiveAgainState.debugTangent === null
   )
     throw new Error(
-      `预测线 1 档后无法恢复 5 档：${JSON.stringify(prediction.fiveAgainState)}`,
+      `预测线 0 档后无法恢复 5 档：${JSON.stringify(prediction.fiveAgainState)}`,
     );
   if (
     !prediction.straightState.normalVisible ||
@@ -388,11 +404,11 @@ try {
   await click(MENU_BUTTON.x, MENU_BUTTON.y);
   await sleep(200);
   const menuOpen = await evaluate(
-    "({open:billiards.model.menuOpen,mask:billiards.hud.hit(640,405,1280,720),camera:billiards.hud.hit(640,294,1280,720)})",
+    "({open:billiards.model.menuOpen,mask:billiards.hud.hit(100,300,1280,720),camera:billiards.hud.hit(640,223,1280,720)})",
   );
   if (!menuOpen?.open || menuOpen.mask !== "modalMask" || menuOpen.camera !== "camera")
     throw new Error(`菜单弹窗未阻止下层触摸：${JSON.stringify(menuOpen)}`);
-  await click(640, 405);
+  await click(100, 300);
   const menuBlocked = await evaluate(
     "({open:billiards.model.menuOpen,angle:billiards.angle})",
   );
@@ -401,7 +417,56 @@ try {
 
   await click(MENU_BUTTON.x, MENU_BUTTON.y);
   await sleep(150);
-  await click(640, 294);
+  const practiceButtons = await evaluate(
+    "billiards.hud.buttons.filter(b=>b.id.startsWith('practicePrediction:')).map(b=>({id:b.id,x:b.x+b.width/2,y:b.y+b.height/2}))",
+  );
+  if (practiceButtons?.length !== 6)
+    throw new Error(
+      `单机菜单未显示六个预测档位：${JSON.stringify(practiceButtons)}`,
+    );
+  const practiceLevels = [];
+  for (const button of practiceButtons) {
+    const level = Number(button.id.split(":")[1]);
+    await click(button.x, button.y);
+    await sleep(80);
+    const current = await evaluate(
+      "({preference:billiards.model.practicePredictionLevel,table:billiards.table.predictionLevel,normal:billiards.table.predictionSegments().normal,tangent:billiards.table.predictionSegments().tangent})",
+    );
+    if (current.preference !== level || current.table !== level)
+      throw new Error(
+        `单机预测 ${level} 档未即时生效：${JSON.stringify(current)}`,
+      );
+    if (
+      level === 0
+        ? current.normal !== null || current.tangent !== null
+        : current.normal === null
+    )
+      throw new Error(
+        `单机预测 ${level} 档可见性错误：${JSON.stringify(current)}`,
+      );
+    practiceLevels.push({ level, ...current });
+  }
+  const threeButton = practiceButtons.find(
+    (button) => button.id === "practicePrediction:3",
+  );
+  await click(threeButton.x, threeButton.y);
+  await sleep(120);
+  const practiceImmediate = await evaluate(
+    "({preference:billiards.model.practicePredictionLevel,table:billiards.table.predictionLevel,open:billiards.model.menuOpen,normal:billiards.table.predictionSegments().normal})",
+  );
+  if (
+    practiceImmediate.preference !== 3 ||
+    practiceImmediate.table !== 3 ||
+    !practiceImmediate.open ||
+    practiceImmediate.normal === null
+  )
+    throw new Error(
+      `单机预测偏好即时生效失败：${JSON.stringify(practiceImmediate)}`,
+    );
+  await screenshot("artifacts/eightball-practice-prediction-menu.png");
+
+  const cameraButton = await buttonCentre("camera");
+  await click(cameraButton.x, cameraButton.y);
   await sleep(500);
   const camera = await evaluate(
     "({topView:billiards.table.topView, open:billiards.model.menuOpen})",
@@ -409,17 +474,46 @@ try {
   if (camera.topView || !camera.open)
     throw new Error(`菜单视角切换失败：${JSON.stringify(camera)}`);
   await screenshot("artifacts/eightball-menu.png");
-  await click(640, 510);
+  const closeButton = await buttonCentre("closeModal");
+  await click(closeButton.x, closeButton.y);
   const menuClosed = await evaluate("billiards.model.menuOpen");
   if (menuClosed) throw new Error("菜单未关闭");
   await screenshot("artifacts/eightball-table-3d.png");
+
   await click(MENU_BUTTON.x, MENU_BUTTON.y);
   await sleep(150);
-  await click(640, 294);
+  const cameraButton2 = await buttonCentre("camera");
+  await click(cameraButton2.x, cameraButton2.y);
   await sleep(500);
-  await click(640, 510);
+  const closeButton2 = await buttonCentre("closeModal");
+  await click(closeButton2.x, closeButton2.y);
   const back2d = await evaluate("billiards.table.topView");
   if (!back2d) throw new Error("未切回 2D");
+
+  await click(MENU_BUTTON.x, MENU_BUTTON.y);
+  await sleep(150);
+  const exitButton = await buttonCentre("exit");
+  await click(exitButton.x, exitButton.y);
+  await sleep(500);
+  const lobby = await evaluate("billiards.model.screen");
+  if (lobby !== "home") throw new Error(`退出对局未回到大厅：${lobby}`);
+  await click(245, 326);
+  await sleep(2000);
+  const restoredPractice = await evaluate(
+    "({screen:billiards.model.screen,topView:billiards.table.topView,preference:billiards.model.practicePredictionLevel,table:billiards.table.predictionLevel,practiceMode:billiards.model.practiceMode,balls:billiards.snapshot?.balls.length})",
+  );
+  if (
+    restoredPractice.screen !== "game" ||
+    !restoredPractice.topView ||
+    !restoredPractice.practiceMode ||
+    restoredPractice.balls !== 16 ||
+    restoredPractice.preference !== 3 ||
+    restoredPractice.table !== 3
+  )
+    throw new Error(
+      `新建练习未恢复预测偏好：${JSON.stringify(restoredPractice)}`,
+    );
+  await screenshot("artifacts/eightball-practice-restored.png");
 
   if (exceptions.length)
     throw new Error(`浏览器异常：${JSON.stringify(exceptions)}`);
@@ -444,7 +538,10 @@ try {
         prediction,
         menuOpen,
         menuBlocked,
+        practiceLevels,
+        practiceImmediate,
         camera,
+        restoredPractice,
         shot: state,
         screenshots: [
           "artifacts/eightball-aim.png",
@@ -452,8 +549,11 @@ try {
           "artifacts/eightball-top-horizontal.png",
           "artifacts/eightball-after-shot.png",
           "artifacts/eightball-ball-in-hand.png",
+          "artifacts/eightball-prediction.png",
+          "artifacts/eightball-practice-prediction-menu.png",
           "artifacts/eightball-menu.png",
           "artifacts/eightball-table-3d.png",
+          "artifacts/eightball-practice-restored.png",
         ],
       },
       null,

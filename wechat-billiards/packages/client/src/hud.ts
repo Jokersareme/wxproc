@@ -33,6 +33,8 @@ export interface HudModel {
   soundOn: boolean;
   createPredictionLevel: number;
   predictionLevel: number;
+  practicePredictionLevel: number;
+  practiceMode: boolean;
 }
 
 interface Button {
@@ -241,26 +243,26 @@ export class Hud {
     this.text("预测线", 92, 326, 22, "#d4e9df", "left", true);
     this.button(
       "prediction:toggle",
-      model.createPredictionLevel > 1 ? "已开启" : "已关闭",
+      model.createPredictionLevel > 0 ? "已开启" : "已关闭",
       190,
       300,
       150,
       52,
-      model.createPredictionLevel > 1,
+      model.createPredictionLevel > 0,
     );
-    for (let level = 1; level <= 5; level += 1) {
+    for (let level = 0; level <= 5; level += 1) {
       this.button(
         `prediction:${level}`,
-        level === 1 ? "关闭" : `${level} 档`,
-        360 + (level - 1) * 110,
+        level === 0 ? "关闭" : `${level} 档`,
+        360 + level * 94,
         300,
-        96,
+        84,
         52,
         model.createPredictionLevel === level,
       );
     }
     this.text(
-      "仅显示首颗碰撞球的法线/切线方向，档位越高越长",
+      "0 档关闭，1–5 档距离递增；仅显示首颗碰撞球方向",
       360,
       286,
       18,
@@ -459,19 +461,51 @@ export class Hud {
 
   private drawMenuModal(model: HudModel) {
     this.drawMask();
-    this.panel(420, 170, 440, 380, 0.97);
-    this.text("菜单", 640, 220, 32, "#f4d99b", "center", true);
-    this.button("camera", "切换视角（2D / 3D）", 470, 264, 340, 60);
+    this.panel(340, 120, 600, 500, 0.97);
+    this.text("菜单", 640, 164, 32, "#f4d99b", "center", true);
+    this.button("camera", "切换视角（2D / 3D）", 410, 190, 460, 52);
     this.button(
       "sound",
       model.soundOn ? "音效：开" : "音效：关",
-      470,
-      338,
-      340,
-      60,
+      410,
+      250,
+      460,
+      52,
     );
-    this.button("exit", "退出对局", 470, 412, 340, 60, true);
-    this.button("closeModal", "返回台面", 470, 486, 340, 48);
+    if (model.practiceMode) {
+      this.text(
+        "预测线（单机练习，即时生效）",
+        640,
+        324,
+        18,
+        "#b7d7cb",
+        "center",
+      );
+      for (let level = 0; level <= 5; level += 1) {
+        this.button(
+          `practicePrediction:${level}`,
+          level === 0 ? "关闭" : `${level} 档`,
+          368 + level * 92,
+          340,
+          84,
+          48,
+          model.practicePredictionLevel === level,
+        );
+      }
+      this.button("exit", "退出对局", 410, 402, 460, 52, true);
+      this.button("closeModal", "返回台面", 410, 464, 460, 44);
+    } else {
+      this.text(
+        `预测线：${this.predictionName(model.predictionLevel)}（房间设置）`,
+        640,
+        330,
+        20,
+        "#f4d99b",
+        "center",
+      );
+      this.button("exit", "退出对局", 410, 384, 460, 54, true);
+      this.button("closeModal", "返回台面", 410, 450, 460, 46);
+    }
   }
 
   private drawSpinModal(model: HudModel) {
@@ -639,7 +673,7 @@ export class Hud {
   }
 
   private predictionName(level?: number): string {
-    if (!level || level <= 1) return "关闭";
+    if (level === undefined || level <= 0) return "关闭";
     return `${level} 档`;
   }
 

@@ -128,26 +128,15 @@ describe("prediction geometry", () => {
     ).toBeNull();
   });
 
-  it("maps levels 1-5 to zero and quarter steps of a third of the table", () => {
+  it("maps levels 0-5 to off plus fifth steps of a third of the table", () => {
     const outerHalfWidth = 1.5;
     const maximum = maxPredictionLength(outerHalfWidth);
     expect(maximum).toBeCloseTo(1, 10);
-    expect(predictionLengthForLevel(1, outerHalfWidth)).toBe(0);
-    expect(predictionLengthForLevel(2, outerHalfWidth)).toBeCloseTo(
-      maximum / 4,
-      10,
-    );
-    expect(predictionLengthForLevel(3, outerHalfWidth)).toBeCloseTo(
-      maximum / 2,
-      10,
-    );
-    expect(predictionLengthForLevel(4, outerHalfWidth)).toBeCloseTo(
-      (maximum * 3) / 4,
-      10,
-    );
-    expect(predictionLengthForLevel(5, outerHalfWidth)).toBeCloseTo(
-      maximum,
-      10,
-    );
+    expect(predictionLengthForLevel(0, outerHalfWidth)).toBe(0);
+    for (let level = 1; level <= 5; level += 1)
+      expect(predictionLengthForLevel(level, outerHalfWidth)).toBeCloseTo(
+        (maximum * level) / 5,
+        10,
+      );
   });
 });

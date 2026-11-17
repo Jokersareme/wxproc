@@ -37,6 +37,7 @@ export class GameApp {
   private animating = false;
   private onlineMatch = false;
   private sound = true;
+  private practicePredictionLevel = 0;
   private pendingInvitation?: { roomCode: string; inviteToken: string };
 
   constructor(
@@ -58,8 +59,10 @@ export class GameApp {
       menuOpen: false,
       spinOpen: false,
       soundOn: this.sound,
-      createPredictionLevel: 1,
+      createPredictionLevel: 0,
       predictionLevel: 0,
+      practicePredictionLevel: 0,
+      practiceMode: false,
     };
     this.network = new NetworkClient(platform, options.serverUrl, {
       onMessage: (message) => this.onMessage(message),
@@ -269,9 +272,20 @@ export class GameApp {
       this.model.message = "正在创建房间…";
     } else if (action === "prediction:toggle") {
       this.model.createPredictionLevel =
-        this.model.createPredictionLevel > 1 ? 1 : 3;
+        this.model.createPredictionLevel > 0 ? 0 : 3;
     } else if (action.startsWith("prediction:")) {
       this.model.createPredictionLevel = Number(action.split(":")[1]);
+    } else if (action.startsWith("practicePrediction:")) {
+      const level = Math.max(
+        0,
+        Math.min(5, Number(action.split(":")[1]) || 0),
+      );
+      this.practicePredictionLevel = level;
+      this.model.practicePredictionLevel = level;
+      if (!this.onlineMatch && this.model.screen === "game") {
+        this.model.predictionLevel = level;
+        this.table.setPredictionLevel(level);
+      }
     } else if (action === "friend") {
       this.model.screen = "friend";
       this.model.message = undefined;
@@ -370,9 +384,11 @@ export class GameApp {
     this.angle = 0;
     this.model.spinX = 0;
     this.model.spinY = 0;
-    this.model.predictionLevel = 0;
+    this.model.predictionLevel = this.practicePredictionLevel;
+    this.model.practicePredictionLevel = this.practicePredictionLevel;
+    this.model.practiceMode = true;
     this.closeModals();
-    this.table.setPredictionLevel(0);
+    this.table.setPredictionLevel(this.practicePredictionLevel);
     this.table.setTopView(true);
     this.table.sync(this.snapshot);
     this.table.setAim(this.angle, this.model.power);
@@ -384,8 +400,8 @@ export class GameApp {
     const input: ShotInput = {
       angle: this.angle,
       power: this.model.power,
-      spinX: this.model.spinX,
-      spinY: this.model.spinY,
+      spinX: -this.model.spinX,
+      spinY: -this.model.spinY,
       elevation: 0,
     };
     this.model.spinX = 0;
@@ -466,7 +482,8 @@ export class GameApp {
       if (message.room.status === "waiting") this.model.screen = "room";
       else this.model.screen = "game";
       this.model.message = message.snapshot.lastMessage;
-      this.model.predictionLevel = message.room.predictionLevel ?? 1;
+      this.model.practiceMode = false;
+      this.model.predictionLevel = message.room.predictionLevel ?? 0;
       this.table.setPredictionLevel(this.model.predictionLevel);
       if (enteringGame) {
         this.model.spinX = 0;
@@ -542,6 +559,7 @@ export class GameApp {
     this.model.screen = "home";
     this.model.message = this.sound ? "sound:on" : "sound:off";
     this.model.predictionLevel = 0;
+    this.model.practiceMode = false;
     this.model.spinX = 0;
     this.model.spinY = 0;
     this.closeModals();
