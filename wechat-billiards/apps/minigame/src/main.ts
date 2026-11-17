@@ -130,7 +130,8 @@ class WeChatPlatform implements ClientPlatform {
     oscillator.frequency.value = 140 + strength * 160;
     gain.gain.setValueAtTime(0.055, context.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.075);
-    oscillator.connect(gain).connect(context.destination);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
     oscillator.start();
     oscillator.stop(context.currentTime + 0.08);
     oscillator.onended = () => context.close?.();
