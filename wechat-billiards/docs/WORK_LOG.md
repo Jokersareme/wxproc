@@ -19,8 +19,8 @@
 | 数据库集合 | `billiards_rooms` |
 | 源码目录 | `D:/GS/AI_WORK/KIMI/others/game/wxproc/wechat-billiards` |
 | 公开仓库 | `https://github.com/Jokersareme/wxproc` |
-| 当前游戏代码提交 | `c52a27fa5a8c9d19036240083a4024370449ded7` |
-| 当前代码对应源码 | `https://github.com/Jokersareme/wxproc/tree/c52a27fa5a8c9d19036240083a4024370449ded7/wechat-billiards` |
+| 当前游戏代码提交 | `2ae5939aaea5838612ebfb9c019a3f0503f034f2` |
+| 当前代码对应源码 | `https://github.com/Jokersareme/wxproc/tree/2ae5939aaea5838612ebfb9c019a3f0503f034f2/wechat-billiards` |
 
 `friend-billiards` 是早期内部工程和产物名称，`wechat-billiards` 是源码目录名，`hc-billiards` 是云服务名。三者用途不同，不影响运行。客户端和云端的 `hc-billiards` 服务名已经一致。
 
@@ -96,6 +96,8 @@ https://hc-billiards-349228-8-1534449846.sh.run.tcloudbase.com/health
 - 黑八房间创建成功。
 - 云端健康检查当时返回 `rooms: 1`。
 - 数据库房间计数当时为 1，证明云端登录、WebSocket 和数据库写入链路已打通。
+- `0.1.1` 真机首次击球出现 `n.connect(...).connect is not a function`。微信真机的音频节点 `connect()` 不能像浏览器一样链式调用，已在提交 `2ae5939` 中改为分别连接振荡器、增益节点和输出节点。
+- 修复后 lint、4 个测试套件及 28 项测试、微信端生产构建均通过；真机回归仍待 `0.1.2` 上传后验证。
 
 开发者工具仍有黄色提示：Three.js 多实例及 `PCFSoftShadowMap` 自动回退到 `PCFShadowMap`。它们不是当前阻断错误，后续可优化。
 
@@ -103,8 +105,8 @@ https://hc-billiards-349228-8-1534449846.sh.run.tcloudbase.com/health
 
 - `0.1.0` 曾上传并设置为体验版。
 - 体验版二维码当时显示在 2026-11-24 前有效。
-- `0.1.1` 用于横向俯视修复，客户端已构建、公开源码已推送。
-- 已指导上传 `0.1.1` 并重新设为体验版，但尚无用户明确完成确认，恢复工作后应先核实。
+- `0.1.1` 已能在真机进入游戏，但首次击球存在上述音频报错。
+- `0.1.2` 用于修复真机音频报错，客户端已构建、公开源码已推送；尚需上传并重新设为体验版，不能把旧二维码对应的版本当作已修复版本。
 - 朋友是否已正确加入“体验成员”尚未最终确认。项目成员的运营者、开发者或数据分析权限不应仅为了试玩而开放。
 - 尚未完成两个微信号通过分享卡片加入、双方准备和交替击球验证。
 - 尚未提交审核或正式发布。
@@ -129,20 +131,21 @@ https://hc-billiards-349228-8-1534449846.sh.run.tcloudbase.com/health
 
 云托管上传页面要求 ZIP 根目录存在 `Dockerfile`。部署 ZIP 已在根目录加入与 `apps/server/Dockerfile` 相同的文件，原始工程结构不变。
 
-当前微信端构建使用云环境 `cloud1-d9gpsduw019b04ff0`、服务 `hc-billiards` 和提交 `c52a27f` 的公开源码链接，已检查不包含 AppSecret 或 API Key。
+当前微信端构建使用云环境 `cloud1-d9gpsduw019b04ff0`、服务 `hc-billiards` 和提交 `2ae5939` 的公开源码链接，已检查不包含 AppSecret 或 API Key。
 
 ## 9. 下一步操作
 
-1. 核实 `0.1.1` 是否已上传并在公众平台重新设为体验版。
-2. 确认朋友已加入体验成员，而不是仅获得项目管理权限。
-3. 使用两部手机和两个不同微信号；也可使用开发者工具加朋友手机，但身份必须不同。
-4. 最新体验版中创建黑八房，通过真实微信分享卡片邀请朋友。
-5. 双方准备，各自完成击球，检查球的位置、回合、犯规和比分是否一致。
-6. 验证切后台、断网恢复、房间座位保留及全量状态一致。
-7. 验证认输、双方再来一局、九球和斯诺克关键规则。
-8. 至少完成一台 iOS 和一台 Android 测试后再决定是否提审。
-9. 发布前补齐小程序基础信息、备案、隐私说明、名称、头像、简介和所需资质。
-10. 正式发布前建议轮换此前输出的密钥，并复核数据库和云托管访问权限。
+1. 在微信开发者工具中上传 `0.1.2`，备注“修复真机首次击球的音频连接报错”，并在公众平台重新设为体验版。
+2. 在手机上重新进入最新体验版，先完成一次击球，确认不再出现 `connect is not a function`。
+3. 确认朋友已加入体验成员，而不是仅获得项目管理权限。
+4. 使用两部手机和两个不同微信号；也可使用开发者工具加朋友手机，但身份必须不同。
+5. 最新体验版中创建黑八房，通过真实微信分享卡片邀请朋友。
+6. 双方准备，各自完成击球，检查球的位置、回合、犯规和比分是否一致。
+7. 验证切后台、断网恢复、房间座位保留及全量状态一致。
+8. 验证认输、双方再来一局、九球和斯诺克关键规则。
+9. 至少完成一台 iOS 和一台 Android 测试后再决定是否提审。
+10. 发布前补齐小程序基础信息、备案、隐私说明、名称、头像、简介和所需资质。
+11. 正式发布前建议轮换此前输出的密钥，并复核数据库和云托管访问权限。
 
 ## 10. 常用命令
 
@@ -161,7 +164,7 @@ corepack yarn build
 ```bash
 export CLOUDBASE_ENV_ID="cloud1-d9gpsduw019b04ff0"
 export CLOUDBASE_SERVICE="hc-billiards"
-export SOURCE_URL="https://github.com/Jokersareme/wxproc/tree/c52a27fa5a8c9d19036240083a4024370449ded7/wechat-billiards"
+export SOURCE_URL="https://github.com/Jokersareme/wxproc/tree/2ae5939aaea5838612ebfb9c019a3f0503f034f2/wechat-billiards"
 corepack yarn build:minigame
 corepack yarn source:archive
 ```
