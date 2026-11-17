@@ -1,3 +1,9 @@
+import { Vector3 } from "three";
+import { PHYSICS_STEP, tunedMaxPower } from "@friend-billiards/core";
+import { Ball, State } from "../../../third_party/billiards/src/model/ball";
+import { Collision } from "../../../third_party/billiards/src/model/physics/collision";
+import { cueStrike } from "../../../third_party/billiards/src/model/physics/physics";
+
 export interface Point2 {
   x: number;
   y: number;
@@ -9,9 +15,18 @@ export interface PredictionBall {
   state: string;
 }
 
+export interface PredictionStroke {
+  power: number;
+  spinX: number;
+  spinY: number;
+}
+
 export interface FirstBallPrediction {
   ballId: number;
   contact: Point2;
+  cueStart: Point2;
+  objectCenter: Point2;
+  incoming: Point2;
   normal: Point2;
   tangent: Point2 | null;
 }
@@ -23,10 +38,16 @@ export function maxPredictionLength(outerHalfWidth: number): number {
 export function predictionLengthForLevel(
   level: number,
   outerHalfWidth: number,
+  power = 1,
 ): number {
   if (!Number.isFinite(level) || level <= 0) return 0;
   const steps = Math.min(5, Math.floor(level));
-  return (maxPredictionLength(outerHalfWidth) * steps) / 5;
+  const strength = Number.isFinite(power)
+    ? Math.max(0, Math.min(1, power))
+    : 1;
+  return (
+    (maxPredictionLength(outerHalfWidth) * steps * (0.35 + 0.65 * strength)) / 5
+  );
 }
 
 /**
@@ -85,6 +106,9 @@ export function predictFirstBall(
   return {
     ballId: first.id,
     contact,
+    cueStart: { x: cue.x, y: cue.y },
+    objectCenter: { x: first.pos[0], y: first.pos[1] },
+    incoming: unit,
     normal,
     tangent:
       tangentLength < 1e-6
@@ -93,26 +117,115 @@ export function predictFirstBall(
   };
 }
 
+function physicalCuePath(
+  prediction: FirstBallPrediction,
+  length: number,
+  stroke: PredictionStroke,
+): Point2[] | null {
+  const strike = cueStrike(
+    Math.atan2(prediction.incoming.y, prediction.incoming.x),
+    stroke.power * tunedMaxPower(),
+    new Vector3(-stroke.spinX, -stroke.spinY, 0),
+  );
+  const cue = new Ball(
+    new Vector3(prediction.cueStart.x, prediction.cueStart.y, 0),
+  );
+  const object = new Ball(
+    new Vector3(prediction.objectCenter.x, prediction.objectCenter.y, 0),
+  );
+  cue.vel.copy(strike.vel);
+  cue.rvel.copy(strike.rvel);
+  cue.state = State.Sliding;
+
+  let collided = false;
+  let offset = { x: 0, y: 0 };
+  let previous = prediction.contact;
+  let travelled = 0;
+  let postCollisionSteps = 0;
+  const path: Point2[] = [];
+  const maximumSteps = Math.ceil(45 / PHYSICS_STEP);
+  for (let step = 0; step < maximumSteps; step += 1) {
+    if (!collided && Collision.willCollide(cue, object, PHYSICS_STEP)) {
+      Collision.collide(cue, object);
+      collided = true;
+      offset = {
+        x: prediction.contact.x - cue.pos.x,
+        y: prediction.contact.y - cue.pos.y,
+      };
+      path.push(prediction.contact);
+      continue;
+    }
+
+    cue.update(PHYSICS_STEP);
+    cue.fround();
+    if (!collided) {
+      if (!cue.inMotion()) return null;
+      continue;
+    }
+
+    postCollisionSteps += 1;
+    if (Math.hypot(cue.vel.x, cue.vel.y) < 0.008) return path;
+    if (postCollisionSteps % 8 !== 0 && cue.inMotion()) continue;
+    const current = {
+      x: cue.pos.x + offset.x,
+      y: cue.pos.y + offset.y,
+    };
+    const segment = Math.hypot(
+      current.x - previous.x,
+      current.y - previous.y,
+    );
+    if (segment > 1e-9) {
+      if (travelled + segment >= length) {
+        const alpha = (length - travelled) / segment;
+        path.push({
+          x: previous.x + (current.x - previous.x) * alpha,
+          y: previous.y + (current.y - previous.y) * alpha,
+        });
+        return path;
+      }
+      path.push(current);
+      travelled += segment;
+      previous = current;
+    }
+    if (!cue.inMotion()) return path;
+  }
+  return path.length > 1 ? path : null;
+}
+
 export function predictionSegments(
   prediction: FirstBallPrediction,
   length: number,
-): { normal: [Point2, Point2]; tangent: [Point2, Point2] | null } {
+  stroke?: PredictionStroke,
+): { normal: [Point2, Point2]; tangent: Point2[] | null } {
+  const impact = Math.max(
+    0,
+    Math.min(
+      1,
+      prediction.incoming.x * prediction.normal.x +
+        prediction.incoming.y * prediction.normal.y,
+    ),
+  );
+  const normalLength = length * (0.25 + 0.75 * impact);
+  const cueLength = length * (1 - 0.5 * impact);
+  const geometricPath = prediction.tangent
+    ? [
+        prediction.contact,
+        {
+          x: prediction.contact.x + prediction.tangent.x * cueLength,
+          y: prediction.contact.y + prediction.tangent.y * cueLength,
+        },
+      ]
+    : null;
   return {
     normal: [
       prediction.contact,
       {
-        x: prediction.contact.x + prediction.normal.x * length,
-        y: prediction.contact.y + prediction.normal.y * length,
+        x: prediction.contact.x + prediction.normal.x * normalLength,
+        y: prediction.contact.y + prediction.normal.y * normalLength,
       },
     ],
-    tangent: prediction.tangent
-      ? [
-          prediction.contact,
-          {
-            x: prediction.contact.x + prediction.tangent.x * length,
-            y: prediction.contact.y + prediction.tangent.y * length,
-          },
-        ]
-      : null,
+    tangent: stroke
+      ? (physicalCuePath(prediction, cueLength, stroke) ?? geometricPath)
+      : geometricPath,
   };
 }

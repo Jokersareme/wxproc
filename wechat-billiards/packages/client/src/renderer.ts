@@ -5,6 +5,7 @@ import type {
   ShotFrame,
 } from "@friend-billiards/core";
 import { tableDimensions } from "@friend-billiards/core";
+import { Rack } from "../../../third_party/billiards/src/utils/rack";
 import type { ClientPlatform } from "./platform";
 import {
   predictFirstBall,
@@ -63,11 +64,13 @@ export class TableRenderer {
   private predictionLevel = 0;
   private predictionDebug: {
     normal: [Point2, Point2] | null;
-    tangent: [Point2, Point2] | null;
+    tangent: Point2[] | null;
   } = { normal: null, tangent: null };
   private snapshot?: MatchSnapshot;
   private angle = 0;
   private power = 0.5;
+  private spinX = 0;
+  private spinY = 0;
   private topView = false;
   private animation?: {
     frames: ShotFrame[];
@@ -141,8 +144,8 @@ export class TableRenderer {
     if (!this.topView) return { x: 0, y: 0, width, height };
     const left = (width * 120) / 1280;
     const right = (width * 120) / 1280;
-    const top = (height * 170) / 720;
-    const bottom = (height * 80) / 720;
+    const top = (height * 84) / 720;
+    const bottom = (height * 50) / 720;
     return {
       x: left,
       y: top,
@@ -155,9 +158,11 @@ export class TableRenderer {
     this.setTopView(!this.topView);
   }
 
-  setAim(angle: number, power: number) {
+  setAim(angle: number, power: number, spinX = 0, spinY = 0) {
     this.angle = angle;
     this.power = power;
+    this.spinX = spinX;
+    this.spinY = spinY;
     this.updateAim();
   }
 
@@ -359,10 +364,6 @@ export class TableRenderer {
       roughness: 1,
       side: THREE.DoubleSide,
     });
-    const leather = new THREE.MeshStandardMaterial({
-      color: 0x17110d,
-      roughness: 0.82,
-    });
     const cupDepth = d.ballRadius * 3.2;
     pockets.forEach(([x, y]) => {
       const cup = new THREE.Mesh(
@@ -386,14 +387,8 @@ export class TableRenderer {
       );
       bottom.position.set(x, y, -cupDepth);
       this.tableGroup.add(bottom);
-      const lip = new THREE.Mesh(
-        new THREE.RingGeometry(pocketRadius * 0.93, pocketRadius * 1.12, 40),
-        leather,
-      );
-      lip.position.set(x, y, 0.002);
-      lip.receiveShadow = true;
-      this.tableGroup.add(lip);
     });
+    this.buildSnookerMarkings();
 
     const wood = new THREE.MeshStandardMaterial({
       color: 0x4c2415,
@@ -505,6 +500,56 @@ export class TableRenderer {
     floor.position.z = -0.16;
     floor.receiveShadow = true;
     this.tableGroup.add(floor);
+  }
+
+  private buildSnookerMarkings() {
+    if (this.currentGameType !== "snooker") return;
+    const d = tableDimensions();
+    const height = d.ballRadius * 0.06;
+    const material = new THREE.LineBasicMaterial({
+      color: 0xd9eadf,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+    });
+    const baulk = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(Rack.baulk, -d.halfHeight, height),
+        new THREE.Vector3(Rack.baulk, d.halfHeight, height),
+      ]),
+      material,
+    );
+    this.tableGroup.add(baulk);
+
+    const arc: THREE.Vector3[] = [];
+    for (let index = 0; index <= 48; index += 1) {
+      const angle = Math.PI / 2 + (index / 48) * Math.PI;
+      arc.push(
+        new THREE.Vector3(
+          Rack.baulk + Math.cos(angle) * Rack.sixth,
+          Math.sin(angle) * Rack.sixth,
+          height,
+        ),
+      );
+    }
+    this.tableGroup.add(
+      new THREE.Line(new THREE.BufferGeometry().setFromPoints(arc), material),
+    );
+
+    const spotMaterial = new THREE.MeshBasicMaterial({
+      color: 0xd9eadf,
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false,
+    });
+    Rack.snookerColourPositions().forEach((position) => {
+      const spot = new THREE.Mesh(
+        new THREE.CircleGeometry(d.ballRadius * 0.16, 16),
+        spotMaterial,
+      );
+      spot.position.set(position.x, position.y, height);
+      this.tableGroup.add(spot);
+    });
   }
 
   private buildCue() {
@@ -669,6 +714,7 @@ export class TableRenderer {
     const length = predictionLengthForLevel(
       this.predictionLevel,
       dimensions.outerHalfWidth,
+      this.power,
     );
     const prediction = this.snapshot
       ? predictFirstBall(
@@ -683,7 +729,11 @@ export class TableRenderer {
       this.hidePrediction();
       return;
     }
-    const segments = predictionSegments(prediction, length);
+    const segments = predictionSegments(prediction, length, {
+      power: this.power,
+      spinX: this.spinX,
+      spinY: this.spinY,
+    });
     const toPoint = (point: Point2) =>
       new THREE.Vector3(point.x, point.y, height);
     this.predictionNormalGeometry.setFromPoints([
@@ -693,10 +743,20 @@ export class TableRenderer {
     this.predictionNormalGeometry.computeBoundingSphere();
     this.predictionNormalLine.visible = true;
     if (segments.tangent) {
-      this.predictionTangentGeometry.setFromPoints([
-        toPoint(segments.tangent[0]),
-        toPoint(segments.tangent[1]),
-      ]);
+      const points = segments.tangent.map(toPoint);
+      if (points.length > 2) {
+        const start = points[0];
+        const initial = points[1].clone().sub(start).normalize();
+        const control = start.clone().addScaledVector(initial, length * 0.35);
+        const curve = new THREE.QuadraticBezierCurve3(
+          start,
+          control,
+          points.at(-1)!,
+        );
+        this.predictionTangentGeometry.setFromPoints(curve.getPoints(32));
+      } else {
+        this.predictionTangentGeometry.setFromPoints(points);
+      }
       this.predictionTangentGeometry.computeBoundingSphere();
       this.predictionTangentLine.visible = true;
     } else {
@@ -727,7 +787,7 @@ export class TableRenderer {
       const fitWidth =
         dimensions.outerHalfWidth /
         (halfFovTangent * this.camera.aspect);
-      const distance = Math.max(fitHeight, fitWidth) * 1.25;
+      const distance = Math.max(fitHeight, fitWidth) * 1.06;
       this.camera.up.set(0, 1, 0);
       this.camera.position.set(0, 0, distance);
       this.camera.lookAt(0, 0, 0);
@@ -735,8 +795,8 @@ export class TableRenderer {
       this.camera.up.set(0, 0, 1);
       this.camera.position.set(
         0,
-        -2.65 * aspectCompensation,
-        2.65 * aspectCompensation,
+        -2.15 * aspectCompensation,
+        2.15 * aspectCompensation,
       );
       this.camera.lookAt(0, 0.08, 0);
     }

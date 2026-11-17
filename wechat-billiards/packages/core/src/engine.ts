@@ -29,7 +29,7 @@ import type {
   Vec3Data,
 } from "./types";
 
-const PHYSICS_STEP = 0.001953125;
+export const PHYSICS_STEP = 0.001953125;
 const MAX_SHOT_SECONDS = 90;
 const FRAME_INTERVAL = 8;
 
@@ -119,7 +119,7 @@ export class MatchEngine {
       version: 1,
       gameType,
       phase: "aiming",
-      canRepositionCue: false,
+      canRepositionCue: true,
       practice: options.practice ?? false,
       currentPlayer: 0,
       players: options.playerNames ?? ["玩家 1", "玩家 2"],

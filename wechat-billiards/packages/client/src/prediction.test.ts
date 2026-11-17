@@ -6,6 +6,9 @@ import {
   type PredictionBall,
 } from "./prediction";
 
+(globalThis as { __BILLIARDS_HEADLESS__?: boolean }).__BILLIARDS_HEADLESS__ =
+  true;
+
 const radius = 0.03275;
 const collisionDistance = radius * 2;
 
@@ -92,10 +95,54 @@ describe("prediction geometry", () => {
 
     const segments = predictionSegments(prediction, 1);
     expect(segments.normal[1].x).toBeCloseTo(
-      prediction.contact.x + prediction.normal.x,
+      prediction.contact.x +
+        prediction.normal.x *
+          (0.25 +
+            0.75 *
+              (prediction.incoming.x * prediction.normal.x +
+                prediction.incoming.y * prediction.normal.y)),
       10,
     );
     expect(segments.tangent).not.toBeNull();
+  });
+
+  it("simulates rolling before contact and the physical cue trajectory", () => {
+    const prediction = predictFirstBall(
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      [ball(1, 1, 0.03)],
+      radius,
+      1,
+    )!;
+    const segments = predictionSegments(prediction, 1, {
+      power: 0.5,
+      spinX: 0,
+      spinY: 0,
+    });
+    expect(segments.tangent).not.toBeNull();
+    const points = segments.tangent!;
+    expect(points.length).toBeGreaterThan(2);
+    const last = points.at(-1)!;
+    const direction = {
+      x: last.x - prediction.contact.x,
+      y: last.y - prediction.contact.y,
+    };
+    const magnitude = Math.hypot(direction.x, direction.y);
+    expect(magnitude).toBeGreaterThan(0);
+    const forward =
+      (direction.x * prediction.normal.x +
+        direction.y * prediction.normal.y) /
+      magnitude;
+    expect(forward).toBeGreaterThan(0);
+    expect(segments.normal[1].x).toBeCloseTo(
+      prediction.contact.x +
+        prediction.normal.x *
+          (0.25 +
+            0.75 *
+              (prediction.incoming.x * prediction.normal.x +
+                prediction.incoming.y * prediction.normal.y)),
+      10,
+    );
   });
 
   it("ignores overlapping balls, pocketed balls and misses", () => {
@@ -138,5 +185,12 @@ describe("prediction geometry", () => {
         (maximum * level) / 5,
         10,
       );
+  });
+
+  it("keeps low-power lines visible and increases their length with power", () => {
+    const low = predictionLengthForLevel(1, 1.5, 0.03);
+    const high = predictionLengthForLevel(1, 1.5, 1);
+    expect(low).toBeCloseTo((1 / 5) * (0.35 + 0.65 * 0.03), 10);
+    expect(high).toBeGreaterThan(low);
   });
 });

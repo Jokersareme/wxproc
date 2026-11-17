@@ -13,10 +13,10 @@ import type { GameType } from "./types";
  * applied after it, on both the client and the authoritative server.
  */
 export const GAME_PHYSICS = Object.freeze({
-  rollingFriction: 0.009,
-  slidingFriction: 0.15,
-  cushionRestitution: 0.72,
-  powerScale: 0.72,
+  rollingFriction: 0.012,
+  slidingFriction: 0.18,
+  cushionRestitution: 0.6,
+  powerScale: 0.66,
 });
 
 export function applyMatchTable(

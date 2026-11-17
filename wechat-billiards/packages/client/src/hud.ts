@@ -342,8 +342,8 @@ export class Hud {
   private drawGame(model: HudModel) {
     const snapshot = model.snapshot;
     if (!snapshot) return;
-    this.panel(16, 16, 1248, 82, 0.76);
-    this.button("menu", "菜单", 30, 30, 96, 52);
+    this.panel(16, 12, 1248, 68, 0.76);
+    this.button("menu", "菜单", 30, 20, 88, 44);
     const leftGroup =
       snapshot.gameType === "eightball"
         ? this.groupName(snapshot.groups[0])
@@ -355,29 +355,29 @@ export class Hud {
     this.text(
       snapshot.players[0],
       148,
-      51,
-      24,
+      39,
+      22,
       snapshot.currentPlayer === 0 ? "#f4d99b" : "#ffffff",
       "left",
       true,
     );
-    this.text(leftGroup, 148, 80, 18, "#9ed8c1");
+    this.text(leftGroup, 148, 65, 16, "#9ed8c1");
     this.text(
       snapshot.players[1],
       786,
-      51,
-      24,
+      39,
+      22,
       snapshot.currentPlayer === 1 ? "#f4d99b" : "#ffffff",
       "right",
       true,
     );
-    this.text(rightGroup, 786, 80, 18, "#9ed8c1", "right");
+    this.text(rightGroup, 786, 65, 16, "#9ed8c1", "right");
     const target =
       snapshot.gameType === "snooker"
         ? this.snookerTarget(snapshot)
         : `第 ${snapshot.shotNumber + 1} 杆`;
-    this.text(target, 420, 63, 19, "#d4e9df");
-    this.button("spinButton", "杆法", 32, 632, 110, 56);
+    this.text(target, 420, 38, 18, "#d4e9df");
+    this.button("spinButton", "杆法", 15, 568, 96, 52);
 
     const sliderBottom = SLIDER_TOP + SLIDER_HEIGHT;
     const powerY = sliderBottom - model.power * SLIDER_HEIGHT;
@@ -421,10 +421,10 @@ export class Hud {
     this.button(
       "shoot",
       snapshot.phase === "ballInHand" ? "先摆母球" : "击球",
-      1112,
-      SLIDER_TOP + SLIDER_HEIGHT + 18,
-      138,
-      76,
+      1161,
+      568,
+      96,
+      52,
       true,
       !model.canShoot,
     );
@@ -439,8 +439,7 @@ export class Hud {
           ? "任意球：可拖动白球调整，或点击台面瞄准"
           : (snapshot.lastMessage ??
             "单击台面瞄准，拖动粗瞄，右侧微调"));
-    this.panel(280, 112, 720, 48, 0.62);
-    this.text(status, 640, 144, 19, "#f1e5bd", "center");
+    this.text(status, 420, 65, 13, "#f1e5bd", "left", false, 350);
     if (snapshot.phase === "gameOver") this.drawGameOver(model);
     if (model.spinOpen) this.drawSpinModal(model);
     if (model.menuOpen) this.drawMenuModal(model);
@@ -664,12 +663,13 @@ export class Hud {
     colour: string,
     align = "left",
     bold = false,
+    maxWidth?: number,
   ) {
     this.context.fillStyle = colour;
     this.context.font = `${bold ? "bold " : ""}${size}px sans-serif`;
     this.context.textAlign = align;
     this.context.textBaseline = "middle";
-    this.context.fillText(text, x, y);
+    this.context.fillText(text, x, y, maxWidth);
   }
 
   private predictionName(level?: number): string {

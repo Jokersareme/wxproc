@@ -189,18 +189,20 @@ export class GameApp {
     if (!this.gesture) return;
     if (this.gesture === "power") {
       this.model.power = this.hud.powerAt(point.y);
+      this.syncAim();
     } else if (this.gesture === "fineAim" && this.lastPoint) {
       const delta = ((point.y - this.lastPoint.y) * 720) / this.platform.height;
-      this.angle += delta * 0.0008;
+      this.angle += delta * 0.00045;
       this.model.fineAimOffset = Math.max(
         -1,
         Math.min(1, this.model.fineAimOffset + delta / 160),
       );
-      this.table.setAim(this.angle, this.model.power);
+      this.syncAim();
     } else if (this.gesture === "spin") {
       const spin = this.hud.spinAt(point.x, point.y);
       this.model.spinX = spin.x;
       this.model.spinY = spin.y;
+      this.syncAim();
     } else if (this.gesture === "aim") {
       this.aimAt(point);
     } else if (this.gesture === "place" && this.snapshot) {
@@ -255,7 +257,16 @@ export class GameApp {
     const dy = position.y - cue.pos[1];
     if (Math.hypot(dx, dy) < 0.0001) return;
     this.angle = Math.atan2(dy, dx);
-    this.table.setAim(this.angle, this.model.power);
+    this.syncAim();
+  }
+
+  private syncAim() {
+    this.table.setAim(
+      this.angle,
+      this.model.power,
+      this.model.spinX,
+      this.model.spinY,
+    );
   }
 
   private async action(action: string) {
@@ -391,7 +402,7 @@ export class GameApp {
     this.table.setPredictionLevel(this.practicePredictionLevel);
     this.table.setTopView(true);
     this.table.sync(this.snapshot);
-    this.table.setAim(this.angle, this.model.power);
+    this.syncAim();
     this.redraw();
   }
 
@@ -406,6 +417,7 @@ export class GameApp {
     };
     this.model.spinX = 0;
     this.model.spinY = 0;
+    this.syncAim();
     if (this.onlineMatch && this.room) {
       this.animating = true;
       this.model.message = "等待服务器判定…";
@@ -492,7 +504,7 @@ export class GameApp {
         this.table.setTopView(true);
       }
       this.table.sync(message.snapshot);
-      this.table.setAim(this.angle, this.model.power);
+      this.syncAim();
     } else if (message.type === "shot") {
       this.room = message.room;
       this.onlineMatch = true;

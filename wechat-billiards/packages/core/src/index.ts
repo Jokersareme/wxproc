@@ -1,4 +1,4 @@
-export { MatchEngine, validateShotInput } from "./engine";
+export { MatchEngine, PHYSICS_STEP, validateShotInput } from "./engine";
 export { hashSnapshot } from "./hash";
 export { tableDimensions } from "./geometry";
 export { applyMatchTable, GAME_PHYSICS, tunedMaxPower } from "./tuning";
