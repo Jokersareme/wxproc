@@ -6,6 +6,12 @@ import type {
 } from "@friend-billiards/core";
 import { tableDimensions } from "@friend-billiards/core";
 import type { ClientPlatform } from "./platform";
+import {
+  predictFirstBall,
+  predictionLengthForLevel,
+  predictionSegments,
+  type Point2,
+} from "./prediction";
 
 const poolColours = [
   "#f4f1df",
@@ -50,6 +56,15 @@ export class TableRenderer {
   private readonly cueGroup = new THREE.Group();
   private readonly aimGeometry = new THREE.BufferGeometry();
   private readonly aimLine: THREE.Line;
+  private readonly predictionNormalGeometry = new THREE.BufferGeometry();
+  private readonly predictionTangentGeometry = new THREE.BufferGeometry();
+  private readonly predictionNormalLine: THREE.Line;
+  private readonly predictionTangentLine: THREE.Line;
+  private predictionLevel = 0;
+  private predictionDebug: {
+    normal: [Point2, Point2] | null;
+    tangent: [Point2, Point2] | null;
+  } = { normal: null, tangent: null };
   private snapshot?: MatchSnapshot;
   private angle = 0;
   private power = 0.5;
@@ -84,6 +99,25 @@ export class TableRenderer {
       }),
     );
     this.scene.add(this.aimLine);
+    this.predictionNormalLine = new THREE.Line(
+      this.predictionNormalGeometry,
+      new THREE.LineBasicMaterial({
+        color: 0xffc766,
+        transparent: true,
+        opacity: 0.9,
+      }),
+    );
+    this.predictionTangentLine = new THREE.Line(
+      this.predictionTangentGeometry,
+      new THREE.LineBasicMaterial({
+        color: 0x86e5ff,
+        transparent: true,
+        opacity: 0.9,
+      }),
+    );
+    this.predictionNormalLine.visible = false;
+    this.predictionTangentLine.visible = false;
+    this.scene.add(this.predictionNormalLine, this.predictionTangentLine);
     this.buildLights();
     this.buildTable();
     this.buildCue();
@@ -108,7 +142,7 @@ export class TableRenderer {
     const left = (width * 120) / 1280;
     const right = (width * 120) / 1280;
     const top = (height * 170) / 720;
-    const bottom = (height * 180) / 720;
+    const bottom = (height * 80) / 720;
     return {
       x: left,
       y: top,
@@ -125,6 +159,19 @@ export class TableRenderer {
     this.angle = angle;
     this.power = power;
     this.updateAim();
+  }
+
+  setPredictionLevel(level: number) {
+    this.predictionLevel = Math.max(0, Math.min(5, Math.floor(level) || 0));
+    this.updateAim();
+  }
+
+  predictionSegments() {
+    return {
+      level: this.predictionLevel,
+      normal: this.predictionDebug.normal,
+      tangent: this.predictionDebug.tangent,
+    };
   }
 
   sync(snapshot: MatchSnapshot) {
@@ -145,6 +192,7 @@ export class TableRenderer {
     };
     this.aimLine.visible = false;
     this.cueGroup.visible = false;
+    this.hidePrediction();
     const tick = () => {
       if (!this.animation) {
         this.sync(finalSnapshot);
@@ -566,6 +614,7 @@ export class TableRenderer {
     if (!this.snapshot || this.snapshot.phase !== "aiming" || this.animation) {
       this.aimLine.visible = false;
       this.cueGroup.visible = false;
+      this.hidePrediction();
       return;
     }
     const cue = this.snapshot.balls[0];
@@ -603,6 +652,63 @@ export class TableRenderer {
     this.cueGroup.position.copy(start);
     this.cueGroup.rotation.z = this.angle;
     this.cueGroup.position.addScaledVector(direction, -0.02 * this.power);
+    this.updatePrediction(
+      { x: cue.pos[0], y: cue.pos[1] },
+      { x: direction.x, y: direction.y },
+      start.z,
+      d,
+    );
+  }
+
+  private updatePrediction(
+    cue: Point2,
+    direction: Point2,
+    height: number,
+    dimensions: ReturnType<typeof tableDimensions>,
+  ) {
+    const length = predictionLengthForLevel(
+      this.predictionLevel,
+      dimensions.outerHalfWidth,
+    );
+    const prediction = this.snapshot
+      ? predictFirstBall(
+          cue,
+          direction,
+          this.snapshot.balls,
+          dimensions.ballRadius,
+          length,
+        )
+      : null;
+    if (!prediction) {
+      this.hidePrediction();
+      return;
+    }
+    const segments = predictionSegments(prediction, length);
+    const toPoint = (point: Point2) =>
+      new THREE.Vector3(point.x, point.y, height);
+    this.predictionNormalGeometry.setFromPoints([
+      toPoint(segments.normal[0]),
+      toPoint(segments.normal[1]),
+    ]);
+    this.predictionNormalGeometry.computeBoundingSphere();
+    this.predictionNormalLine.visible = true;
+    if (segments.tangent) {
+      this.predictionTangentGeometry.setFromPoints([
+        toPoint(segments.tangent[0]),
+        toPoint(segments.tangent[1]),
+      ]);
+      this.predictionTangentGeometry.computeBoundingSphere();
+      this.predictionTangentLine.visible = true;
+    } else {
+      this.predictionTangentLine.visible = false;
+    }
+    this.predictionDebug = segments;
+  }
+
+  private hidePrediction() {
+    this.predictionNormalLine.visible = false;
+    this.predictionTangentLine.visible = false;
+    this.predictionDebug = { normal: null, tangent: null };
   }
 
   private updateCamera() {

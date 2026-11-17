@@ -95,15 +95,26 @@ try {
   await host.login("e2e-host");
   await guest.login("e2e-guest");
 
+  const invalidLevel = await host.request(
+    { type: "createRoom", gameType: "eightball", predictionLevel: 9 },
+    (m) => m.type === "error",
+  );
+  if (!invalidLevel.message.includes("预测线档位"))
+    throw new Error("服务器未拒绝非法预测线档位");
+
   const created = await host.request(
-    { type: "createRoom", gameType: "eightball" },
+    { type: "createRoom", gameType: "eightball", predictionLevel: 4 },
     (m) => m.type === "room",
   );
   const { roomCode, inviteToken, matchId } = created.room;
-  await guest.request(
+  if (created.room.predictionLevel !== 4)
+    throw new Error("创建房间未保存预测线档位");
+  const joined = await guest.request(
     { type: "joinRoom", roomCode, inviteToken },
     (m) => m.type === "room" && m.room.players.length === 2,
   );
+  if (joined.room.predictionLevel !== 4)
+    throw new Error("加入房间后预测线档位丢失");
   await host.request(
     { type: "ready", roomCode, ready: true },
     (m) => m.type === "room",
@@ -130,7 +141,13 @@ try {
     type: "shoot",
     matchId,
     shotId: "e2e-shot-1",
-    input: { angle: 0, power: 0.3, spinX: 0, spinY: 0, elevation: 0 },
+    input: {
+      angle: Math.PI,
+      power: 0.02,
+      spinX: 0,
+      spinY: 0,
+      elevation: 0,
+    },
   };
   const hostShotStart = host.messages.length;
   const guestShotStart = guest.messages.length;
@@ -198,6 +215,8 @@ try {
     !restored.snapshot.canRepositionCue
   )
     throw new Error("服务重启后未恢复权威快照或自由球资格");
+  if (restored.room.predictionLevel !== 4)
+    throw new Error("服务重启后预测线档位丢失");
 
   const reconnectedGuest = new Client();
   await reconnectedGuest.connect(restartedPort);
@@ -216,6 +235,31 @@ try {
     rematchStart,
   );
   if (ended.snapshot.winner === current) throw new Error("认输胜负判定错误");
+  if (ended.room.predictionLevel !== 4)
+    throw new Error("对局结束后预测线档位丢失");
+
+  concedingClient.send({ type: "rematch", matchId });
+  await concedingClient.wait(
+    (m) => m.type === "room" && m.room.rematchUserIds.length === 1,
+  );
+  const rematchBroadcastStart = reconnected.messages.length;
+  const otherClient =
+    concedingClient === reconnected ? reconnectedGuest : reconnected;
+  otherClient.send({ type: "rematch", matchId });
+  const rematch = await otherClient.wait(
+    (m) => m.type === "room" && m.room.status === "playing",
+    rematchBroadcastStart,
+  );
+  if (
+    rematch.room.predictionLevel !== 4 ||
+    rematch.snapshot.shotNumber !== 0
+  )
+    throw new Error("再来一局未保留预测线档位或未重置对局");
+  const rematchOnHost = await reconnected.wait(
+    (m) => m.type === "room" && m.room.status === "playing",
+  );
+  if (rematchOnHost.room.predictionLevel !== 4)
+    throw new Error("再来一局双端预测线档位不一致");
 
   reconnected.close();
   reconnectedGuest.close();
@@ -223,6 +267,7 @@ try {
     JSON.stringify(
       {
         ok: true,
+        predictionLevel: rematch.room.predictionLevel,
         checks: [
           "health",
           "login",
@@ -232,9 +277,12 @@ try {
           "turn-authority",
           "dual-shot",
           "idempotency",
+          "prediction-invalid-level",
+          "prediction-persisted",
           "repeat-ball-in-hand",
           "restart-restore",
           "concede",
+          "rematch-prediction",
         ],
         stateHash: secondPlacement.stateHash,
       },

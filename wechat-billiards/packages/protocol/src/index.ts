@@ -27,7 +27,11 @@ interface BaseMessage {
 export type ClientMessage = BaseMessage &
   (
     | { type: "login"; code?: string; token?: string; displayName?: string }
-    | { type: "createRoom"; gameType: GameType }
+    | {
+        type: "createRoom";
+        gameType: GameType;
+        predictionLevel: number;
+      }
     | { type: "joinRoom"; roomCode: string; inviteToken: string }
     | { type: "ready"; roomCode: string; ready: boolean }
     | { type: "placeBall"; matchId: string; x: number; y: number }
@@ -53,6 +57,7 @@ export interface RoomState {
   inviteToken: string;
   matchId: string;
   gameType: GameType;
+  predictionLevel: number;
   status: "waiting" | "playing" | "gameOver";
   players: RoomPlayer[];
   rematchUserIds: string[];
@@ -136,16 +141,26 @@ export function parseClientMessage(value: unknown): ClientMessage {
         token: value.token as string | undefined,
         displayName: value.displayName as string | undefined,
       };
-    case "createRoom":
+    case "createRoom": {
       if (
         !["eightball", "nineball", "snooker"].includes(value.gameType as string)
       )
         throw new Error("玩法无效");
+      const predictionLevel =
+        value.predictionLevel === undefined ? 1 : value.predictionLevel;
+      if (
+        !Number.isInteger(predictionLevel) ||
+        (predictionLevel as number) < 1 ||
+        (predictionLevel as number) > 5
+      )
+        throw new Error("预测线档位无效");
       return {
         ...base,
         type: "createRoom",
         gameType: value.gameType as GameType,
+        predictionLevel: predictionLevel as number,
       };
+    }
     case "joinRoom":
       if (
         !/^\d{6}$/.test(value.roomCode as string) ||

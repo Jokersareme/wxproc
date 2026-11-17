@@ -8,6 +8,10 @@ const HEIGHT = 720;
 const SLIDER_TOP = 190;
 const SLIDER_HEIGHT = 320;
 const FINE_AIM_TRAVEL = SLIDER_HEIGHT / 2;
+const SPIN_MODAL_X = 640;
+const SPIN_MODAL_Y = 380;
+const SPIN_MODAL_RADIUS = 120;
+const SPIN_LIMIT = 0.42;
 
 export interface HudModel {
   screen: "home" | "friend" | "room" | "game" | "license";
@@ -24,6 +28,11 @@ export interface HudModel {
   canShoot: boolean;
   online: boolean;
   sourceUrl: string;
+  menuOpen: boolean;
+  spinOpen: boolean;
+  soundOn: boolean;
+  createPredictionLevel: number;
+  predictionLevel: number;
 }
 
 interface Button {
@@ -122,14 +131,14 @@ export class Hud {
   spinAt(x: number, y: number): { x: number; y: number } {
     const logicalX = (x / (this.lastScreenWidth || WIDTH)) * WIDTH;
     const logicalY = (y / (this.lastScreenHeight || HEIGHT)) * HEIGHT;
-    let spinX = (logicalX - 202) / 54;
-    let spinY = (logicalY - 626) / 54;
+    let spinX = (logicalX - SPIN_MODAL_X) / SPIN_MODAL_RADIUS;
+    let spinY = (logicalY - SPIN_MODAL_Y) / SPIN_MODAL_RADIUS;
     const length = Math.hypot(spinX, spinY);
     if (length > 1) {
       spinX /= length;
       spinY /= length;
     }
-    return { x: spinX * 0.42, y: spinY * 0.42 };
+    return { x: spinX * SPIN_LIMIT, y: spinY * SPIN_LIMIT };
   }
 
   private lastScreenWidth = WIDTH;
@@ -181,7 +190,7 @@ export class Hud {
     this.button("license", "规则与开源许可", 446, 446, 300, 64);
     this.button(
       "sound",
-      model.message === "sound:on" ? "音效：开" : "音效：关",
+      model.soundOn ? "音效：开" : "音效：关",
       446,
       530,
       300,
@@ -203,9 +212,9 @@ export class Hud {
       "create:eightball",
       "创建黑八房",
       92,
-      220,
+      204,
       300,
-      76,
+      72,
       true,
       !model.online,
     );
@@ -213,9 +222,9 @@ export class Hud {
       "create:nineball",
       "创建九球房",
       418,
-      220,
+      204,
       300,
-      76,
+      72,
       false,
       !model.online,
     );
@@ -223,15 +232,43 @@ export class Hud {
       "create:snooker",
       "创建斯诺克房",
       744,
-      220,
+      204,
       300,
-      76,
+      72,
       false,
       !model.online,
     );
-    this.button("join", "使用房间码 / 邀请令牌加入", 92, 344, 464, 76);
+    this.text("预测线", 92, 326, 22, "#d4e9df", "left", true);
+    this.button(
+      "prediction:toggle",
+      model.createPredictionLevel > 1 ? "已开启" : "已关闭",
+      190,
+      300,
+      150,
+      52,
+      model.createPredictionLevel > 1,
+    );
+    for (let level = 1; level <= 5; level += 1) {
+      this.button(
+        `prediction:${level}`,
+        level === 1 ? "关闭" : `${level} 档`,
+        360 + (level - 1) * 110,
+        300,
+        96,
+        52,
+        model.createPredictionLevel === level,
+      );
+    }
+    this.text(
+      "仅显示首颗碰撞球的法线/切线方向，档位越高越长",
+      360,
+      286,
+      18,
+      "#9db7af",
+    );
+    this.button("join", "使用房间码 / 邀请令牌加入", 92, 384, 464, 72);
     this.button("back", "返回大厅", 92, 572, 220, 58);
-    if (model.message) this.text(model.message, 92, 478, 21, "#edb6a5");
+    if (model.message) this.text(model.message, 92, 500, 21, "#edb6a5");
   }
 
   private drawRoom(model: HudModel) {
@@ -251,6 +288,13 @@ export class Hud {
       238,
       21,
       "#b7d7cb",
+    );
+    this.text(
+      `预测线：${this.predictionName(model.room?.predictionLevel)}`,
+      92,
+      268,
+      20,
+      "#f4d99b",
     );
     const players = model.room?.players ?? [];
     players.forEach((player, index) => {
@@ -297,6 +341,7 @@ export class Hud {
     const snapshot = model.snapshot;
     if (!snapshot) return;
     this.panel(16, 16, 1248, 82, 0.76);
+    this.button("menu", "菜单", 30, 30, 96, 52);
     const leftGroup =
       snapshot.gameType === "eightball"
         ? this.groupName(snapshot.groups[0])
@@ -307,14 +352,14 @@ export class Hud {
         : `${snapshot.scores[1]} 分`;
     this.text(
       snapshot.players[0],
-      44,
+      148,
       51,
       24,
       snapshot.currentPlayer === 0 ? "#f4d99b" : "#ffffff",
       "left",
       true,
     );
-    this.text(leftGroup, 44, 80, 18, "#9ed8c1");
+    this.text(leftGroup, 148, 80, 18, "#9ed8c1");
     this.text(
       snapshot.players[1],
       786,
@@ -330,34 +375,7 @@ export class Hud {
         ? this.snookerTarget(snapshot)
         : `第 ${snapshot.shotNumber + 1} 杆`;
     this.text(target, 420, 63, 19, "#d4e9df");
-    this.button("exit", "退出", 870, 30, 108, 52);
-    this.button("camera", "视角", 1034, 624, 90, 56);
-    this.button("sound", "音效", 1136, 624, 90, 56);
-    this.panel(24, 560, 232, 138, 0.68);
-    this.text("杆法", 42, 590, 18, "#b7d7cb");
-    this.context.strokeStyle = "#d8eee4";
-    this.context.lineWidth = 3;
-    this.context.beginPath();
-    this.context.arc(202, 626, 54, 0, Math.PI * 2);
-    this.context.stroke();
-    this.context.fillStyle = "#e9f4ee";
-    this.context.beginPath();
-    this.context.arc(
-      202 + (model.spinX / 0.42) * 54,
-      626 + (model.spinY / 0.42) * 54,
-      8,
-      0,
-      Math.PI * 2,
-    );
-    this.context.fill();
-    this.buttons.push({
-      id: "spin",
-      label: "",
-      x: 142,
-      y: 566,
-      width: 120,
-      height: 120,
-    });
+    this.button("spinButton", "杆法", 32, 632, 110, 56);
 
     const sliderBottom = SLIDER_TOP + SLIDER_HEIGHT;
     const powerY = sliderBottom - model.power * SLIDER_HEIGHT;
@@ -401,10 +419,10 @@ export class Hud {
     this.button(
       "shoot",
       snapshot.phase === "ballInHand" ? "先摆母球" : "击球",
-      842,
-      600,
-      154,
-      82,
+      1112,
+      SLIDER_TOP + SLIDER_HEIGHT + 18,
+      138,
+      76,
       true,
       !model.canShoot,
     );
@@ -422,6 +440,83 @@ export class Hud {
     this.panel(280, 112, 720, 48, 0.62);
     this.text(status, 640, 144, 19, "#f1e5bd", "center");
     if (snapshot.phase === "gameOver") this.drawGameOver(model);
+    if (model.spinOpen) this.drawSpinModal(model);
+    if (model.menuOpen) this.drawMenuModal(model);
+  }
+
+  private drawMask() {
+    this.context.fillStyle = "rgba(0, 0, 0, 0.62)";
+    this.context.fillRect(0, 0, WIDTH, HEIGHT);
+    this.buttons.push({
+      id: "modalMask",
+      label: "",
+      x: 0,
+      y: 0,
+      width: WIDTH,
+      height: HEIGHT,
+    });
+  }
+
+  private drawMenuModal(model: HudModel) {
+    this.drawMask();
+    this.panel(420, 170, 440, 380, 0.97);
+    this.text("菜单", 640, 220, 32, "#f4d99b", "center", true);
+    this.button("camera", "切换视角（2D / 3D）", 470, 264, 340, 60);
+    this.button(
+      "sound",
+      model.soundOn ? "音效：开" : "音效：关",
+      470,
+      338,
+      340,
+      60,
+    );
+    this.button("exit", "退出对局", 470, 412, 340, 60, true);
+    this.button("closeModal", "返回台面", 470, 486, 340, 48);
+  }
+
+  private drawSpinModal(model: HudModel) {
+    this.drawMask();
+    this.panel(390, 210, 500, 360, 0.97);
+    this.text("杆法", 640, 252, 30, "#f4d99b", "center", true);
+    this.text("拖动白点调整击球点，关闭后生效", 640, 288, 18, "#b7d7cb", "center");
+    this.context.strokeStyle = "#d8eee4";
+    this.context.lineWidth = 3;
+    this.context.beginPath();
+    this.context.arc(
+      SPIN_MODAL_X,
+      SPIN_MODAL_Y,
+      SPIN_MODAL_RADIUS,
+      0,
+      Math.PI * 2,
+    );
+    this.context.stroke();
+    this.context.strokeStyle = "rgba(216, 238, 228, 0.35)";
+    this.context.lineWidth = 1;
+    this.context.beginPath();
+    this.context.moveTo(SPIN_MODAL_X - SPIN_MODAL_RADIUS, SPIN_MODAL_Y);
+    this.context.lineTo(SPIN_MODAL_X + SPIN_MODAL_RADIUS, SPIN_MODAL_Y);
+    this.context.moveTo(SPIN_MODAL_X, SPIN_MODAL_Y - SPIN_MODAL_RADIUS);
+    this.context.lineTo(SPIN_MODAL_X, SPIN_MODAL_Y + SPIN_MODAL_RADIUS);
+    this.context.stroke();
+    this.context.fillStyle = "#e9f4ee";
+    this.context.beginPath();
+    this.context.arc(
+      SPIN_MODAL_X + (model.spinX / SPIN_LIMIT) * SPIN_MODAL_RADIUS,
+      SPIN_MODAL_Y + (model.spinY / SPIN_LIMIT) * SPIN_MODAL_RADIUS,
+      10,
+      0,
+      Math.PI * 2,
+    );
+    this.context.fill();
+    this.buttons.push({
+      id: "spinPad",
+      label: "",
+      x: SPIN_MODAL_X - SPIN_MODAL_RADIUS,
+      y: SPIN_MODAL_Y - SPIN_MODAL_RADIUS,
+      width: SPIN_MODAL_RADIUS * 2,
+      height: SPIN_MODAL_RADIUS * 2,
+    });
+    this.button("closeModal", "关闭", 560, 492, 160, 48);
   }
 
   private drawGameOver(model: HudModel) {
@@ -541,6 +636,11 @@ export class Hud {
     this.context.textAlign = align;
     this.context.textBaseline = "middle";
     this.context.fillText(text, x, y);
+  }
+
+  private predictionName(level?: number): string {
+    if (!level || level <= 1) return "关闭";
+    return `${level} 档`;
   }
 
   private groupName(group: string): string {

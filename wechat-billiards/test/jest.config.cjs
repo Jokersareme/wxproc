@@ -1,6 +1,7 @@
 module.exports = {
   rootDir: "../",
   testEnvironment: "jsdom",
+  modulePathIgnorePatterns: ["<rootDir>/release/"],
   testMatch: [
     "<rootDir>/packages/**/*.test.ts",
     "<rootDir>/apps/**/*.test.ts",

@@ -1,6 +1,7 @@
 export { MatchEngine, validateShotInput } from "./engine";
 export { hashSnapshot } from "./hash";
 export { tableDimensions } from "./geometry";
+export { applyMatchTable, GAME_PHYSICS, tunedMaxPower } from "./tuning";
 export type {
   BallGroup,
   BallSnapshot,

@@ -59,7 +59,11 @@ export class RoomService {
   async handle(context: ClientContext, message: ClientMessage) {
     switch (message.type) {
       case "createRoom":
-        return this.createRoom(context, message.gameType);
+        return this.createRoom(
+          context,
+          message.gameType,
+          message.predictionLevel,
+        );
       case "joinRoom":
         return this.joinRoom(context, message.roomCode, message.inviteToken);
       case "ready":
@@ -129,7 +133,11 @@ export class RoomService {
     return this.rooms.size;
   }
 
-  private async createRoom(context: ClientContext, gameType: GameType) {
+  private async createRoom(
+    context: ClientContext,
+    gameType: GameType,
+    predictionLevel: number,
+  ) {
     await this.leaveCurrentRoom(context);
     let roomCode: string;
     do roomCode = String(randomInt(1000000)).padStart(6, "0");
@@ -146,6 +154,7 @@ export class RoomService {
       inviteToken,
       matchId,
       gameType,
+      predictionLevel,
       status: "waiting",
       players: [
         {
@@ -408,6 +417,7 @@ export class RoomService {
       inviteToken: room.record.inviteToken,
       matchId: room.record.matchId,
       gameType: room.record.gameType,
+      predictionLevel: room.record.predictionLevel,
       status: room.record.status,
       players: room.record.players.map((player) => ({
         ...player,
@@ -435,6 +445,12 @@ export class RoomService {
   }
 
   private install(record: RoomRecord): ActiveRoom {
+    if (
+      !Number.isInteger(record.predictionLevel) ||
+      record.predictionLevel < 1 ||
+      record.predictionLevel > 5
+    )
+      record.predictionLevel = 1;
     const engine = MatchEngine.restore(record.snapshot);
     const room: ActiveRoom = {
       record,

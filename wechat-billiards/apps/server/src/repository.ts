@@ -23,6 +23,7 @@ export interface RoomRecord {
   inviteToken: string;
   matchId: string;
   gameType: GameType;
+  predictionLevel: number;
   status: "waiting" | "playing" | "gameOver";
   players: StoredPlayer[];
   snapshot: MatchSnapshot;

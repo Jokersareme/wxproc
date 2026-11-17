@@ -7,15 +7,14 @@ import {
 } from "../../../third_party/billiards/src/model/outcome";
 import { Rack } from "../../../third_party/billiards/src/utils/rack";
 import { Respot } from "../../../third_party/billiards/src/utils/respot";
-import { TableConfig } from "../../../third_party/billiards/src/view/tableconfig";
 import { TableGeometry } from "../../../third_party/billiards/src/view/tablegeometry";
 import { cueStrike } from "../../../third_party/billiards/src/model/physics/physics";
 import {
-  maxPower,
   offCenterLimit,
   R,
 } from "../../../third_party/billiards/src/model/physics/constants";
 import { hashSnapshot } from "./hash";
+import { applyMatchTable, tunedMaxPower } from "./tuning";
 import type {
   BallGroup,
   BallSnapshot,
@@ -178,7 +177,7 @@ export class MatchEngine {
     this.table.time = 0;
     const strike = cueStrike(
       input.angle,
-      input.power * maxPower,
+      input.power * tunedMaxPower(),
       new Vector3(input.spinX, input.spinY, 0),
       input.elevation,
     );
@@ -317,7 +316,7 @@ export class MatchEngine {
   }
 
   private configure(gameType = this.state?.gameType) {
-    TableConfig.apply(gameType, gameType === "snooker" ? 12 : 10);
+    applyMatchTable(gameType);
   }
 
   private serialiseBalls(): BallSnapshot[] {

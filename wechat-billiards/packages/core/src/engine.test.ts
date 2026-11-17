@@ -1,6 +1,13 @@
 import { MatchEngine, validateShotInput } from "./engine";
 import { Outcome } from "../../../third_party/billiards/src/model/outcome";
 import { State } from "../../../third_party/billiards/src/model/ball";
+import {
+  ee,
+  maxPower,
+  mu,
+  muS,
+} from "../../../third_party/billiards/src/model/physics/constants";
+import { GAME_PHYSICS, tunedMaxPower } from "./tuning";
 import { ShotInput } from "./types";
 
 const straightShot: ShotInput = {
@@ -30,6 +37,21 @@ describe("MatchEngine", () => {
     expect(engine.table.balls).toHaveLength(count);
     expect(engine.snapshot().phase).toBe("aiming");
   });
+
+  it.each(["eightball", "nineball", "snooker"] as const)(
+    "applies the shared physics tuning for %s before and after a shot",
+    (gameType) => {
+      const engine = new MatchEngine({ gameType, practice: true });
+      expect(mu).toBe(GAME_PHYSICS.rollingFriction);
+      expect(muS).toBe(GAME_PHYSICS.slidingFriction);
+      expect(ee).toBe(GAME_PHYSICS.cushionRestitution);
+      expect(tunedMaxPower()).toBeCloseTo(maxPower * 0.82, 10);
+      engine.shoot({ ...straightShot, power: 0.1 }, 0);
+      expect(mu).toBe(GAME_PHYSICS.rollingFriction);
+      expect(muS).toBe(GAME_PHYSICS.slidingFriction);
+      expect(ee).toBe(GAME_PHYSICS.cushionRestitution);
+    },
+  );
 
   it("rejects invalid power and excessive spin", () => {
     expect(validateShotInput({ ...straightShot, power: 0 })).toBeTruthy();

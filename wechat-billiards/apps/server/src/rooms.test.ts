@@ -27,13 +27,17 @@ function context(
 
 const shotInput = { angle: 0, power: 0.3, spinX: 0, spinY: 0, elevation: 0 };
 
-async function createPlayingRoom(service: RoomService) {
+async function createPlayingRoom(
+  service: RoomService,
+  predictionLevel = 1,
+) {
   const host = context("host", "房主");
   const guest = context("guest", "球友");
   await service.handle(host.context, {
     protocolVersion: 1,
     type: "createRoom",
     gameType: "eightball",
+    predictionLevel,
   });
   const room = host.socket.last("room").room;
   await service.handle(guest.context, {
@@ -154,6 +158,59 @@ describe("authoritative room service", () => {
     expect(host.socket.last("room").snapshot.scores).toEqual([0, 0]);
   });
 
+  it("keeps the prediction level across join, broadcast, rematch and restart", async () => {
+    const repository = new MemoryRoomRepository();
+    const service = new RoomService(repository);
+    const { host, guest, room } = await createPlayingRoom(service, 4);
+    expect(room.predictionLevel).toBe(4);
+    expect(guest.socket.last("room").room.predictionLevel).toBe(4);
+
+    await service.handle(host.context, {
+      protocolVersion: 1,
+      type: "concede",
+      matchId: room.matchId,
+    });
+    await service.handle(host.context, {
+      protocolVersion: 1,
+      type: "rematch",
+      matchId: room.matchId,
+    });
+    await service.handle(guest.context, {
+      protocolVersion: 1,
+      type: "rematch",
+      matchId: room.matchId,
+    });
+    expect(host.socket.last("room").room.predictionLevel).toBe(4);
+
+    const restoredService = new RoomService(repository);
+    await restoredService.restore();
+    const reconnect = context("host", "房主");
+    await restoredService.handle(reconnect.context, {
+      protocolVersion: 1,
+      type: "sync",
+      matchId: room.matchId,
+    });
+    expect(reconnect.socket.last("room").room.predictionLevel).toBe(4);
+  });
+
+  it("defaults old rooms without a prediction level to level 1", async () => {
+    const repository = new MemoryRoomRepository();
+    const service = new RoomService(repository);
+    const { room } = await createPlayingRoom(service);
+    for (const record of repository.records.values()) {
+      delete (record as any).predictionLevel;
+    }
+    const restoredService = new RoomService(repository);
+    await restoredService.restore();
+    const socket = context("host");
+    await restoredService.handle(socket.context, {
+      protocolVersion: 1,
+      type: "sync",
+      matchId: room.matchId,
+    });
+    expect(socket.socket.last("room").room.predictionLevel).toBe(1);
+  });
+
   it("rejects a wrong invite token", async () => {
     const service = new RoomService(new MemoryRoomRepository());
     const host = context("host");
@@ -161,6 +218,7 @@ describe("authoritative room service", () => {
       protocolVersion: PROTOCOL_VERSION,
       type: "createRoom",
       gameType: "snooker",
+      predictionLevel: 1,
     });
     const room = host.socket.last("room").room;
     const guest = context("guest");

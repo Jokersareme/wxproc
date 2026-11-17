@@ -55,6 +55,11 @@ export class GameApp {
       online: false,
       sourceUrl: options.sourceUrl,
       message: this.sound ? "sound:on" : "sound:off",
+      menuOpen: false,
+      spinOpen: false,
+      soundOn: this.sound,
+      createPredictionLevel: 1,
+      predictionLevel: 0,
     };
     this.network = new NetworkClient(platform, options.serverUrl, {
       onMessage: (message) => this.onMessage(message),
@@ -137,13 +142,23 @@ export class GameApp {
       this.platform.width,
       this.platform.height,
     );
-    if (action === "power" || action === "fineAim" || action === "spin") {
+    if (action === "spinPad") {
+      this.gesture = "spin";
+      this.touchMove(point);
+      return;
+    }
+    if (action === "power" || action === "fineAim") {
       this.gesture = action;
       this.touchMove(point);
       return;
     }
     if (action) {
       void this.action(action);
+      return;
+    }
+    if (this.model.menuOpen || this.model.spinOpen) {
+      this.closeModals();
+      this.redraw();
       return;
     }
     if (this.model.screen !== "game" || this.animating || !this.snapshot)
@@ -249,8 +264,14 @@ export class GameApp {
       this.network.send({
         type: "createRoom",
         gameType: action.split(":")[1] as GameType,
+        predictionLevel: this.model.createPredictionLevel,
       });
       this.model.message = "正在创建房间…";
+    } else if (action === "prediction:toggle") {
+      this.model.createPredictionLevel =
+        this.model.createPredictionLevel > 1 ? 1 : 3;
+    } else if (action.startsWith("prediction:")) {
+      this.model.createPredictionLevel = Number(action.split(":")[1]);
     } else if (action === "friend") {
       this.model.screen = "friend";
       this.model.message = undefined;
@@ -297,10 +318,17 @@ export class GameApp {
       if (action === "exit" && this.onlineMatch && this.room)
         this.network.send({ type: "leave", matchId: this.room.matchId });
       this.goHome();
+    } else if (action === "menu") {
+      this.model.menuOpen = true;
+    } else if (action === "spinButton") {
+      this.model.spinOpen = true;
+    } else if (action === "modalMask" || action === "closeModal") {
+      this.closeModals();
     } else if (action === "camera") {
       this.table.toggleCamera();
     } else if (action === "sound") {
       this.sound = !this.sound;
+      this.model.soundOn = this.sound;
       this.model.message = this.sound ? "sound:on" : "sound:off";
       if (this.model.screen === "game")
         this.model.message = this.sound ? "音效已开启" : "音效已关闭";
@@ -340,6 +368,12 @@ export class GameApp {
     this.model.message = "单人练习：犯规后仍可摆放母球继续";
     this.animating = false;
     this.angle = 0;
+    this.model.spinX = 0;
+    this.model.spinY = 0;
+    this.model.predictionLevel = 0;
+    this.closeModals();
+    this.table.setPredictionLevel(0);
+    this.table.setTopView(true);
     this.table.sync(this.snapshot);
     this.table.setAim(this.angle, this.model.power);
     this.redraw();
@@ -354,6 +388,8 @@ export class GameApp {
       spinY: this.model.spinY,
       elevation: 0,
     };
+    this.model.spinX = 0;
+    this.model.spinY = 0;
     if (this.onlineMatch && this.room) {
       this.animating = true;
       this.model.message = "等待服务器判定…";
@@ -413,6 +449,12 @@ export class GameApp {
       return;
     }
     if (message.type === "room") {
+      const previousRoomStatus = this.room?.status;
+      const enteringGame =
+        message.room.status === "playing" &&
+        (this.model.screen !== "game" ||
+          previousRoomStatus === "waiting" ||
+          previousRoomStatus === "gameOver");
       this.room = message.room;
       this.snapshot = message.snapshot;
       this.onlineMatch = true;
@@ -424,6 +466,14 @@ export class GameApp {
       if (message.room.status === "waiting") this.model.screen = "room";
       else this.model.screen = "game";
       this.model.message = message.snapshot.lastMessage;
+      this.model.predictionLevel = message.room.predictionLevel ?? 1;
+      this.table.setPredictionLevel(this.model.predictionLevel);
+      if (enteringGame) {
+        this.model.spinX = 0;
+        this.model.spinY = 0;
+        this.closeModals();
+        this.table.setTopView(true);
+      }
       this.table.sync(message.snapshot);
       this.table.setAim(this.angle, this.model.power);
     } else if (message.type === "shot") {
@@ -478,6 +528,11 @@ export class GameApp {
     this.model.message = "正在加入房间…";
   }
 
+  private closeModals() {
+    this.model.menuOpen = false;
+    this.model.spinOpen = false;
+  }
+
   private goHome() {
     this.onlineMatch = false;
     this.room = undefined;
@@ -486,6 +541,11 @@ export class GameApp {
     this.animating = false;
     this.model.screen = "home";
     this.model.message = this.sound ? "sound:on" : "sound:off";
+    this.model.predictionLevel = 0;
+    this.model.spinX = 0;
+    this.model.spinY = 0;
+    this.closeModals();
+    this.table.setPredictionLevel(0);
     this.table.cancelAnimation();
   }
 
