@@ -9,6 +9,7 @@ export default tseslint.config(
       ".yarn/**",
       "third_party/**",
       "coverage/**",
+      "release/**",
     ],
   },
   js.configs.recommended,

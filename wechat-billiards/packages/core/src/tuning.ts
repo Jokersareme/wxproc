@@ -16,7 +16,7 @@ export const GAME_PHYSICS = Object.freeze({
   rollingFriction: 0.009,
   slidingFriction: 0.15,
   cushionRestitution: 0.72,
-  powerScale: 0.82,
+  powerScale: 0.72,
 });
 
 export function applyMatchTable(

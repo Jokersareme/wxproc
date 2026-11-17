@@ -45,7 +45,7 @@ describe("MatchEngine", () => {
       expect(mu).toBe(GAME_PHYSICS.rollingFriction);
       expect(muS).toBe(GAME_PHYSICS.slidingFriction);
       expect(ee).toBe(GAME_PHYSICS.cushionRestitution);
-      expect(tunedMaxPower()).toBeCloseTo(maxPower * 0.82, 10);
+      expect(tunedMaxPower()).toBeCloseTo(maxPower * GAME_PHYSICS.powerScale, 10);
       engine.shoot({ ...straightShot, power: 0.1 }, 0);
       expect(mu).toBe(GAME_PHYSICS.rollingFriction);
       expect(muS).toBe(GAME_PHYSICS.slidingFriction);
