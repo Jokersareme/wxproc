@@ -38,6 +38,8 @@ export interface HudModel {
   spinOpen: boolean;
   soundOn: boolean;
   createPredictionLevel: number;
+  createPlaybackSpeed: number;
+  createCameraViews: CameraMode[];
   predictionLevel: number;
   practicePredictionLevel: number;
   practiceMode: boolean;

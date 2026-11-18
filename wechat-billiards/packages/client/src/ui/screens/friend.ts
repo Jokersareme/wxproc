@@ -1,9 +1,20 @@
 import type { GameType } from "@friend-billiards/core";
 import { gutter, safeBottom, safeTop } from "../layout";
-import type { HudModel } from "../model";
+import type { CameraMode, HudModel } from "../model";
 import { colors, radius, typeScale, withAlpha } from "../theme";
 import type { Ui } from "../widgets";
 import { gameName } from "../format";
+
+const createCameraOptions: { id: CameraMode; label: string }[] = [
+  { id: "top", label: "2D 俯视" },
+  { id: "follow", label: "3D 跟杆" },
+  { id: "overview", label: "3D 总览" },
+];
+const createPlaybackOptions = [
+  { id: "1.15", label: "1.15×" },
+  { id: "1.5", label: "1.5×" },
+  { id: "2", label: "2×" },
+];
 
 export function drawFriend(ui: Ui, model: HudModel) {
   const { layout } = ui;
@@ -30,10 +41,10 @@ export function drawFriend(ui: Ui, model: HudModel) {
     layout.width - margin * 2,
   );
 
-  ui.text("创建房间", margin, top + 214, 18, colors.brass300, "left", 600);
+  ui.text("创建房间", margin, top + 188, 18, colors.brass300, "left", 600);
   const gap = 16;
   const cardWidth = (layout.width - margin * 2 - gap * 2) / 3;
-  const cardHeight = 96;
+  const cardHeight = 84;
   const gameTypes: GameType[] = ["eightball", "nineball", "snooker"];
   gameTypes.forEach((gameType, index) => {
     const x = margin + index * (cardWidth + gap);
@@ -42,7 +53,7 @@ export function drawFriend(ui: Ui, model: HudModel) {
       `create:${gameType}`,
       model.creating ? "创建中…" : `创建${gameName(gameType)}房`,
       x,
-      top + 238,
+      top + 210,
       cardWidth,
       cardHeight,
       {
@@ -52,45 +63,86 @@ export function drawFriend(ui: Ui, model: HudModel) {
     );
   });
 
-  ui.text("预测线", margin, top + 376, 18, colors.brass300, "left", 600);
-  ui.text(
-    "0 档关闭，1–5 档距离递增；联机时由房主设置",
-    margin + 82,
-    top + 376,
-    15,
-    colors.sage500,
-    "left",
-    500,
-    layout.width - margin * 2 - 82,
-  );
-  const levelWidth = 78;
-  for (let level = 0; level <= 5; level += 1) {
-    ui.pill(
-      `prediction:${level}`,
-      level === 0 ? "关闭" : `${level} 档`,
-      margin + level * (levelWidth + 8),
-      top + 398,
-      levelWidth,
-      44,
-      model.createPredictionLevel === level,
-    );
-  }
-
+  const settingsY = top + 310;
+  const settingsWidth = layout.width - margin * 2;
   ui.panel(
     margin,
-    top + 474,
-    layout.width - margin * 2,
-    96,
+    settingsY,
+    settingsWidth,
+    196,
     0.82,
     radius.card,
     colors.ink800,
     withAlpha(colors.sage300, 0.18),
   );
-  ui.text("已有房间码？", margin + 24, top + 506, 18, colors.ivory100, "left", 600);
+  ui.text("房间设置", margin + 20, settingsY + 24, 17, colors.ivory100, "left", 600);
+  ui.text(
+    "房主决定 · 加入后自动同步",
+    margin + settingsWidth - 20,
+    settingsY + 24,
+    14,
+    colors.sage500,
+    "right",
+    500,
+    settingsWidth - 150,
+  );
+
+  const rowLabelX = margin + 20;
+  const rowPillX = margin + 96;
+  ui.text("预测线", rowLabelX, settingsY + 66, 15, colors.ivory100, "left", 600);
+  for (let level = 0; level <= 5; level += 1) {
+    ui.pill(
+      `prediction:${level}`,
+      level === 0 ? "关闭" : `${level} 档`,
+      rowPillX + level * 58,
+      settingsY + 48,
+      52,
+      38,
+      model.createPredictionLevel === level,
+    );
+  }
+
+  ui.text("快速播放", rowLabelX, settingsY + 112, 15, colors.ivory100, "left", 600);
+  createPlaybackOptions.forEach((option, index) => {
+    ui.pill(
+      `createPlayback:${option.id}`,
+      option.label,
+      rowPillX + index * 78,
+      settingsY + 94,
+      72,
+      38,
+      String(model.createPlaybackSpeed) === option.id,
+    );
+  });
+
+  ui.text("可用视角", rowLabelX, settingsY + 158, 15, colors.ivory100, "left", 600);
+  createCameraOptions.forEach((option, index) => {
+    ui.pill(
+      `createCameraView:${option.id}`,
+      option.label,
+      rowPillX + index * 112,
+      settingsY + 140,
+      104,
+      38,
+      model.createCameraViews.includes(option.id),
+    );
+  });
+
+  ui.panel(
+    margin,
+    top + 520,
+    layout.width - margin * 2,
+    88,
+    0.82,
+    radius.card,
+    colors.ink800,
+    withAlpha(colors.sage300, 0.18),
+  );
+  ui.text("已有房间码？", margin + 24, top + 548, 18, colors.ivory100, "left", 600);
   ui.text(
     "输入六位数字，或粘贴好友发来的邀请链接",
     margin + 24,
-    top + 536,
+    top + 578,
     15,
     colors.sage300,
   );
@@ -98,7 +150,7 @@ export function drawFriend(ui: Ui, model: HudModel) {
     "join",
     "输入房间码加入",
     layout.width - margin - 264,
-    top + 494,
+    top + 536,
     240,
     56,
     { accent: true, fontSize: 18 },

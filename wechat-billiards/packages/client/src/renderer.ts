@@ -29,6 +29,26 @@ import {
   type Point2,
 } from "./prediction";
 
+const FRAME_MARGIN_RADII = 2.4;
+const RAIL_WIDTH_RADII = 2.2;
+const CAMERA_FIT_MARGIN = 0.99;
+
+function roundedRectShape(width: number, height: number, radius: number) {
+  const shape = new THREE.Shape();
+  const x = -width / 2;
+  const y = -height / 2;
+  shape.moveTo(x + radius, y);
+  shape.lineTo(x + width - radius, y);
+  shape.quadraticCurveTo(x + width, y, x + width, y + radius);
+  shape.lineTo(x + width, y + height - radius);
+  shape.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  shape.lineTo(x + radius, y + height);
+  shape.quadraticCurveTo(x, y + height, x, y + height - radius);
+  shape.lineTo(x, y + radius);
+  shape.quadraticCurveTo(x, y, x + radius, y);
+  return shape;
+}
+
 const poolColours = [
   "#f4f1df",
   "#ebc51b",
@@ -701,17 +721,24 @@ export class TableRenderer {
     cloth.receiveShadow = true;
     this.tableGroup.add(cloth);
 
-    const frameWidth = d.outerHalfWidth + d.ballRadius * 3.2;
-    const frameHeight = d.outerHalfHeight + d.ballRadius * 3.2;
+    const frameWidth = d.outerHalfWidth + d.ballRadius * FRAME_MARGIN_RADII;
+    const frameHeight = d.outerHalfHeight + d.ballRadius * FRAME_MARGIN_RADII;
     const frame = new THREE.Mesh(
-      new THREE.BoxGeometry(frameWidth * 2, frameHeight * 2, 0.16),
+      new THREE.ExtrudeGeometry(
+        roundedRectShape(
+          frameWidth * 2,
+          frameHeight * 2,
+          d.ballRadius * 2.2,
+        ),
+        { depth: 0.16, bevelEnabled: false },
+      ),
       new THREE.MeshStandardMaterial({
         color: 0x5b3020,
         roughness: 0.32,
         metalness: 0.05,
       }),
     );
-    frame.position.z = -0.09;
+    frame.position.z = -0.17;
     frame.receiveShadow = true;
     this.tableGroup.add(frame);
 
@@ -851,7 +878,7 @@ export class TableRenderer {
       clearcoatRoughness: 0.6,
     });
     const railHeight = d.ballRadius * 1.1;
-    const railWidth = d.ballRadius * 2.8;
+    const railWidth = d.ballRadius * RAIL_WIDTH_RADII;
     const cushionWidth = railWidth * 0.32;
     const cornerGap = PocketGeometry.cornerRadius * 1.03;
     const sideGap = PocketGeometry.middleRadius * 0.9;
@@ -1751,10 +1778,14 @@ export class TableRenderer {
     const viewport = this.viewportDesign();
     const aspect = Math.max(0.5, viewport.width / Math.max(1, viewport.height));
     const d = tableDimensions();
-    let halfHeight = d.outerHalfHeight / 0.96;
+    const frameHalfWidth =
+      d.outerHalfWidth + d.ballRadius * FRAME_MARGIN_RADII;
+    const frameHalfHeight =
+      d.outerHalfHeight + d.ballRadius * FRAME_MARGIN_RADII;
+    let halfHeight = frameHalfHeight / CAMERA_FIT_MARGIN;
     let halfWidth = halfHeight * aspect;
-    if (halfWidth < d.outerHalfWidth / 0.96) {
-      halfWidth = d.outerHalfWidth / 0.96;
+    if (halfWidth < frameHalfWidth / CAMERA_FIT_MARGIN) {
+      halfWidth = frameHalfWidth / CAMERA_FIT_MARGIN;
       halfHeight = halfWidth / aspect;
     }
     this.topCamera.left = -halfWidth;

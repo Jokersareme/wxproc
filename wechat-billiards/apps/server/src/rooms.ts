@@ -6,9 +6,13 @@ import {
   type PlayerIndex,
 } from "@friend-billiards/core";
 import {
+  DEFAULT_ROOM_PLAYBACK_SPEED,
   PROTOCOL_VERSION,
   ProtocolError,
+  ROOM_CAMERA_VIEWS,
+  ROOM_PLAYBACK_SPEEDS,
   type ClientMessage,
+  type RoomCameraView,
   type RoomMode,
   type RoomState,
   type ServerMessage,
@@ -44,6 +48,19 @@ function normalisePredictionLevel(value: number): number {
   return Number.isInteger(value) && value >= 0 && value <= 5 ? value : 0;
 }
 
+function normalisePlaybackSpeed(value: number | undefined): number {
+  return (ROOM_PLAYBACK_SPEEDS as readonly number[]).includes(value)
+    ? value
+    : DEFAULT_ROOM_PLAYBACK_SPEED;
+}
+
+function normaliseCameraViews(value: unknown): RoomCameraView[] {
+  const selected = Array.isArray(value)
+    ? ROOM_CAMERA_VIEWS.filter((view) => value.includes(view))
+    : [];
+  return selected.length > 0 ? selected : [...ROOM_CAMERA_VIEWS];
+}
+
 function normaliseMode(value: RoomMode | undefined): RoomMode {
   return value === "cards" || value === "threeSnooker" ? value : "classic";
 }
@@ -57,6 +74,8 @@ function normaliseStatus(value: string | undefined): RoomRecord["status"] {
 
 function normaliseRecord(record: RoomRecord) {
   record.predictionLevel = normalisePredictionLevel(record.predictionLevel ?? 0);
+  record.playbackSpeed = normalisePlaybackSpeed(record.playbackSpeed);
+  record.cameraViews = normaliseCameraViews(record.cameraViews);
   record.mode = normaliseMode(record.mode);
   record.cardCount =
     record.mode === "cards"
@@ -126,11 +145,15 @@ export class RoomService {
           message.predictionLevel,
           message.mode,
           message.cardCount,
+          message.playbackSpeed,
+          message.cameraViews,
         );
       case "joinRoom":
         return this.joinRoom(context, message.roomCode, message.inviteToken);
       case "ready":
         return this.ready(context, message.roomCode);
+      case "updateRoomSettings":
+        return this.updateRoomSettings(context, message.matchId, message);
       case "placeBall":
         return this.placeBall(context, message.matchId, message.x, message.y);
       case "nominateFreeBall":
@@ -204,6 +227,8 @@ export class RoomService {
     predictionLevel: number,
     modeValue?: RoomMode,
     cardCountValue?: number,
+    playbackSpeedValue?: number,
+    cameraViewsValue?: RoomCameraView[],
   ) {
     await this.leaveCurrentRoom(context);
     let roomCode: string;
@@ -229,6 +254,8 @@ export class RoomService {
       matchId,
       gameType,
       predictionLevel: normalisePredictionLevel(predictionLevel),
+      playbackSpeed: normalisePlaybackSpeed(playbackSpeedValue),
+      cameraViews: normaliseCameraViews(cameraViewsValue),
       mode,
       cardCount,
       maxPlayers: mode === "threeSnooker" ? 3 : 2,
@@ -360,6 +387,29 @@ export class RoomService {
     )
       throw new Error("你不在该房间");
     room.sockets.set(context.userId, context.socket);
+    this.broadcastRoom(room);
+  }
+
+  private async updateRoomSettings(
+    context: ClientContext,
+    matchId: string,
+    message: Extract<ClientMessage, { type: "updateRoomSettings" }>,
+  ) {
+    const { room, playerIndex } = this.memberRoom(context, matchId);
+    if (playerIndex !== 0)
+      throw new ProtocolError("HOST_ONLY", "只有房主可以修改房间设置");
+    if (message.predictionLevel !== undefined)
+      room.record.predictionLevel = normalisePredictionLevel(
+        message.predictionLevel,
+      );
+    if (message.playbackSpeed !== undefined)
+      room.record.playbackSpeed = normalisePlaybackSpeed(
+        message.playbackSpeed,
+      );
+    if (message.cameraViews !== undefined)
+      room.record.cameraViews = normaliseCameraViews(message.cameraViews);
+    room.record.seq += 1;
+    await this.save(room);
     this.broadcastRoom(room);
   }
 
@@ -658,6 +708,8 @@ export class RoomService {
       mode: room.record.mode,
       cardCount: room.record.cardCount,
       predictionLevel: room.record.predictionLevel,
+      playbackSpeed: room.record.playbackSpeed,
+      cameraViews: [...room.record.cameraViews],
       status: room.record.status,
       playerCount: room.record.playerCount,
       maxPlayers: room.record.maxPlayers,

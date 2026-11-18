@@ -140,6 +140,72 @@ describe("protocol validation", () => {
     ).toThrow("卡牌数量");
   });
 
+  it("validates synced room settings", () => {
+    const defaulted = parseClientMessage({
+      ...base,
+      type: "createRoom",
+      gameType: "eightball",
+    }) as any;
+    expect(defaulted.playbackSpeed).toBe(1.15);
+    expect(defaulted.cameraViews).toEqual(["top", "follow", "overview"]);
+
+    const accepted = parseClientMessage({
+      ...base,
+      type: "createRoom",
+      gameType: "eightball",
+      playbackSpeed: 1.5,
+      cameraViews: ["top", "overview"],
+    }) as any;
+    expect(accepted.playbackSpeed).toBe(1.5);
+    expect(accepted.cameraViews).toEqual(["top", "overview"]);
+
+    for (const playbackSpeed of [0, 1, 3, "2"])
+      expect(() =>
+        parseClientMessage({
+          ...base,
+          type: "createRoom",
+          gameType: "eightball",
+          playbackSpeed,
+        }),
+      ).toThrow("快速播放档位");
+    for (const cameraViews of [[], ["top", "top"], ["side"], "top"])
+      expect(() =>
+        parseClientMessage({
+          ...base,
+          type: "createRoom",
+          gameType: "eightball",
+          cameraViews,
+        }),
+      ).toThrow("视角设置");
+
+    const update = parseClientMessage({
+      ...base,
+      type: "updateRoomSettings",
+      matchId: "m1",
+      predictionLevel: 4,
+      playbackSpeed: 2,
+      cameraViews: ["follow"],
+    }) as any;
+    expect(update.predictionLevel).toBe(4);
+    expect(update.playbackSpeed).toBe(2);
+    expect(update.cameraViews).toEqual(["follow"]);
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "updateRoomSettings",
+        matchId: "m1",
+      }),
+    ).toThrow("没有变化");
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "updateRoomSettings",
+        matchId: "m1",
+        predictionLevel: 9,
+      }),
+    ).toThrow("预测线档位");
+  });
+
   it("rejects non-finite physics values and unknown commands", () => {
     expect(() =>
       parseClientMessage({

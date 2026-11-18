@@ -1,6 +1,13 @@
 export const DEFAULT_PLAYBACK_SPEED = 1.15;
 export const PLAYBACK_SPEEDS = [1.15, 1.5, 2] as const;
 
+export function normalisePlaybackSpeed(value: unknown): number {
+  return typeof value === "number" &&
+    (PLAYBACK_SPEEDS as readonly number[]).includes(value)
+    ? value
+    : DEFAULT_PLAYBACK_SPEED;
+}
+
 export function playbackDuration(totalMs: number, speed: number): number {
   const safeSpeed =
     Number.isFinite(speed) && speed > 0 ? speed : DEFAULT_PLAYBACK_SPEED;

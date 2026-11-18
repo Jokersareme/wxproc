@@ -5,7 +5,7 @@ import { colors, radius, typeScale, withAlpha } from "../theme";
 import type { Ui } from "../widgets";
 import { gameName } from "../format";
 
-const CLIENT_VERSION = "v0.3.2";
+const CLIENT_VERSION = "v0.3.3";
 
 interface Card {
   id: string;

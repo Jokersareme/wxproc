@@ -8,6 +8,7 @@ export const motionStorageKey = "billiards.reduceMotion";
 export const hintStorageKey = "billiards.hintSeen";
 export const lastRoomStorageKey = "billiards.lastRoom";
 export const cameraViewsStorageKey = "billiards.cameraViews";
+export const playbackSpeedStorageKey = "billiards.playbackSpeed";
 
 export const cameraModes: CameraMode[] = ["top", "follow", "overview"];
 

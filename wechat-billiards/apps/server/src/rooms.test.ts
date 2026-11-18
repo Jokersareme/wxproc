@@ -325,6 +325,33 @@ describe("authoritative room service", () => {
     expect(reconnect.socket.last("room").room.predictionLevel).toBe(4);
   });
 
+  it("lets only the host change room settings and syncs them to guests", async () => {
+    const service = new RoomService(new MemoryRoomRepository());
+    const { host, guest, room } = await createStartingRoom(service);
+    await service.handle(host.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "updateRoomSettings",
+      matchId: room.matchId,
+      predictionLevel: 2,
+      playbackSpeed: 2,
+      cameraViews: ["follow", "overview"],
+    });
+    for (const socket of [host.socket, guest.socket]) {
+      const state = socket.last("room").room;
+      expect(state.predictionLevel).toBe(2);
+      expect(state.playbackSpeed).toBe(2);
+      expect(state.cameraViews).toEqual(["follow", "overview"]);
+    }
+    await expect(
+      service.handle(guest.context, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "updateRoomSettings",
+        matchId: room.matchId,
+        playbackSpeed: 1.5,
+      }),
+    ).rejects.toThrow("只有房主");
+  });
+
   it("normalises old records and promotes a full waiting room to starting", async () => {
     const repository = new MemoryRoomRepository();
     const service = new RoomService(repository);
@@ -332,6 +359,8 @@ describe("authoritative room service", () => {
     jest.clearAllTimers();
     const record = repository.records.get(room.roomCode)!;
     delete (record as any).predictionLevel;
+    delete (record as any).playbackSpeed;
+    delete (record as any).cameraViews;
     delete (record as any).mode;
     delete (record as any).cardCount;
     delete (record as any).maxPlayers;
@@ -357,6 +386,8 @@ describe("authoritative room service", () => {
     });
     const state = socket.socket.last("room");
     expect(state.room.predictionLevel).toBe(0);
+    expect(state.room.playbackSpeed).toBe(1.15);
+    expect(state.room.cameraViews).toEqual(["top", "follow", "overview"]);
     expect(state.room.mode).toBe("classic");
     expect(state.room.maxPlayers).toBe(2);
     expect(state.room.status).toBe("starting");

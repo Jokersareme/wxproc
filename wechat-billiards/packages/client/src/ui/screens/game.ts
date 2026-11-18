@@ -15,6 +15,7 @@ import {
   gameName,
   groupDots,
   playerSubline,
+  targetBrief,
   targetLabel,
 } from "../format";
 import { SPIN_LIMIT } from "../../spin";
@@ -85,50 +86,55 @@ function drawTopBar(
   }
 
   if (snapshot.practice) {
-    const width = 520;
+    const width = 460;
+    const height = 52;
     const x = (layout.width - width) / 2;
     const remaining = snapshot.balls.filter(
       (ball) => ball.id !== 0 && ball.state !== "InPocket",
     ).length;
     const trial = model.trial;
+    const target =
+      snapshot.gameType === "snooker" && snapshot.target.freeBall
+        ? targetLabel(snapshot)
+        : `目标：${targetBrief(snapshot)}`;
     const detail = trial
-      ? `${gameName(snapshot.gameType)} · 好友加入后自动开局 · 房间 ${model.roomCode ?? "------"}`
+      ? `${gameName(snapshot.gameType)} · ${target} · 房间 ${model.roomCode ?? "------"}`
       : snapshot.gameType === "snooker"
-        ? `${gameName(snapshot.gameType)} · 剩余 ${remaining} 球 · 单杆 ${snapshot.currentBreak} 分`
-        : `${gameName(snapshot.gameType)} · 剩余 ${remaining} 球 · 连续 ${snapshot.currentBreak} 球`;
+        ? `${gameName(snapshot.gameType)} · ${target} · 单杆 ${snapshot.currentBreak} 分`
+        : `${gameName(snapshot.gameType)} · ${target} · 剩余 ${remaining} 球`;
     ui.panel(
       x,
-      top + 16,
+      top + 10,
       width,
-      cardHeight,
+      height,
       0.88,
       radius.card,
       colors.ink800,
       withAlpha(colors.brass300, 0.55),
     );
     ui.avatar(
-      x + 18,
-      top + 28,
-      40,
+      x + 14,
+      top + 19,
+      34,
       trial ? "试" : "练",
       colors.brass300,
       true,
     );
     ui.text(
       trial ? "试玩中" : "自由练习",
-      x + 72,
-      top + 38,
-      22,
+      x + 60,
+      top + 27,
+      20,
       colors.brass300,
       "left",
       700,
     );
-    ui.text(detail, x + 72, top + 62, 15, colors.sage300, "left", 500, width - 100);
+    ui.text(detail, x + 60, top + 44, 14, colors.sage300, "left", 500, width - 150);
     ui.text(
       `第 ${snapshot.shotNumber + 1} 杆`,
-      x + width - 18,
-      top + 38,
-      15,
+      x + width - 14,
+      top + 27,
+      14,
       colors.brass300,
       "right",
       600,
@@ -167,19 +173,23 @@ function drawTopBar(
     });
   });
 
+  const gapLeft = leftX + cardWidth;
+  const gapRight = rightX;
+  const centerX = (gapLeft + gapRight) / 2;
+  const gapWidth = Math.max(80, gapRight - gapLeft - 12);
   ui.text(
     targetLabel(snapshot),
-    layout.width / 2,
+    centerX,
     top + 38,
-    typeScale.body,
+    layout.compact ? 15 : typeScale.body,
     colors.ivory100,
     "center",
     600,
-    240,
+    gapWidth,
   );
   ui.text(
     `第 ${snapshot.shotNumber + 1} 杆`,
-    layout.width / 2,
+    centerX,
     top + 61,
     14,
     colors.sage500,
@@ -511,7 +521,19 @@ function cameraLabel(mode: CameraMode) {
   return cameraOptions.find((option) => option.id === mode)?.label ?? "2D 俯视";
 }
 
+const playbackOptions = [
+  { id: "1.15", label: "1.15×" },
+  { id: "1.5", label: "1.5×" },
+  { id: "2", label: "2×" },
+];
+
+function playbackLabel(speed: number) {
+  return `${speed}×`;
+}
+
 const MENU_ROW = 50;
+const ROOM_SETTINGS_COLLAPSED = 44;
+const ROOM_SETTINGS_EXPANDED = 268;
 
 export interface MenuMetrics {
   y: number;
@@ -524,9 +546,9 @@ export interface MenuMetrics {
 function menuContentHeight(expanded: boolean) {
   return (
     8 +
-    (expanded ? 224 : 44) +
+    (expanded ? ROOM_SETTINGS_EXPANDED : ROOM_SETTINGS_COLLAPSED) +
     12 +
-    MENU_ROW * 4 +
+    MENU_ROW * 3 +
     16 +
     1 +
     14 +
@@ -593,7 +615,7 @@ function drawMenu(ui: Ui, model: HudModel) {
 
   let y = metrics.contentTop + 8 - scroll;
   drawRoomSettings(ui, model, margin, y, layout.width - margin * 2, expanded);
-  y += expanded ? 224 : 44;
+  y += expanded ? ROOM_SETTINGS_EXPANDED : ROOM_SETTINGS_COLLAPSED;
   y += 12;
 
   const rowX = layout.width - margin - 120;
@@ -626,22 +648,6 @@ function drawMenu(ui: Ui, model: HudModel) {
     240,
     38,
     model.quality,
-  );
-  y += MENU_ROW;
-
-  ui.text("快速播放", margin, y + 25, 17, colors.ivory100, "left", 600);
-  ui.tabs(
-    "playback",
-    [
-      { id: "1.15", label: "1.15×" },
-      { id: "1.5", label: "1.5×" },
-      { id: "2", label: "2×" },
-    ],
-    rowX - 120,
-    y + 4,
-    240,
-    38,
-    String(model.playbackSpeed),
   );
   y += MENU_ROW;
 
@@ -683,7 +689,9 @@ function drawMenu(ui: Ui, model: HudModel) {
     });
   }
   ui.text(
-    "设置立即生效 · 上下拖动查看更多",
+    model.practiceMode
+      ? "练习设置仅本机生效 · 上下拖动查看更多"
+      : "房间设置由房主决定，全员同步 · 上下拖动查看更多",
     margin,
     y + 62,
     13,
@@ -753,6 +761,13 @@ function drawRoomSettings(
   width: number,
   expanded: boolean,
 ) {
+  const online = !model.practiceMode && Boolean(model.room);
+  const host = online && model.playerIndex === 0;
+  const editable = !online || host;
+  const aimLevel = model.practiceMode
+    ? model.practicePredictionLevel
+    : model.predictionLevel;
+  const aim = aimLevel > 0 ? `${aimLevel} 档` : "关闭";
   ui.panel(
     x,
     y,
@@ -764,12 +779,8 @@ function drawRoomSettings(
     withAlpha(colors.sage300, 0.2),
   );
   ui.text("房间设置", x + 16, y + 23, 17, colors.ivory100, "left", 600);
-  const aimLevel = model.practiceMode
-    ? model.practicePredictionLevel
-    : model.predictionLevel;
-  const aim = aimLevel > 0 ? `${aimLevel} 档` : "关闭";
   ui.text(
-    `当前 ${cameraLabel(model.cameraMode)} · 辅助线 ${aim}`,
+    `当前 ${cameraLabel(model.cameraMode)} · 辅助线 ${aim} · ${playbackLabel(model.playbackSpeed)}`,
     x + width - 60,
     y + 23,
     14,
@@ -797,7 +808,7 @@ function drawRoomSettings(
   });
   if (!expanded) return;
 
-  const pillX = x + 68;
+  const pillX = x + 92;
   const viewY = y + 54;
   ui.text("视角", x + 16, viewY + 19, 15, colors.ivory100, "left", 600);
   cameraOptions.forEach((option, index) => {
@@ -818,7 +829,11 @@ function drawRoomSettings(
     }
   });
   ui.text(
-    "点选切换视角；再点当前项可隐藏，至少保留一个",
+    online
+      ? host
+        ? "点选切换或隐藏视角，修改后全员同步"
+        : "房主设置的可用视角，点选切换当前视角"
+      : "点选切换视角；再点当前项可隐藏，至少保留一个",
     pillX,
     viewY + 58,
     13,
@@ -828,23 +843,27 @@ function drawRoomSettings(
     width - (pillX - x) - 16,
   );
 
-  const aimY = viewY + 122;
+  const aimY = viewY + 82;
   ui.text("辅助线", x + 16, aimY + 19, 15, colors.ivory100, "left", 600);
-  if (model.practiceMode) {
+  if (editable) {
+    const prefix = model.practiceMode ? "practicePrediction" : "roomPrediction";
+    const selected = model.practiceMode
+      ? model.practicePredictionLevel
+      : model.predictionLevel;
     for (let level = 0; level <= 5; level += 1) {
       ui.pill(
-        `practicePrediction:${level}`,
+        `${prefix}:${level}`,
         level === 0 ? "关闭" : `${level} 档`,
         pillX + level * 58,
         aimY,
         52,
         38,
-        model.practicePredictionLevel === level,
+        selected === level,
       );
     }
   } else {
     ui.text(
-      `${aim}（房间设置）`,
+      `${aim}（房主设置）`,
       pillX,
       aimY + 19,
       15,
@@ -853,6 +872,46 @@ function drawRoomSettings(
       500,
     );
   }
+
+  const speedY = aimY + 54;
+  ui.text("快速播放", x + 16, speedY + 19, 15, colors.ivory100, "left", 600);
+  if (editable) {
+    playbackOptions.forEach((option, index) => {
+      ui.pill(
+        `playback:${option.id}`,
+        option.label,
+        pillX + index * 78,
+        speedY,
+        72,
+        38,
+        String(model.playbackSpeed) === option.id,
+      );
+    });
+  } else {
+    ui.text(
+      `${playbackLabel(model.playbackSpeed)}（房主设置）`,
+      pillX,
+      speedY + 19,
+      15,
+      colors.sage500,
+      "left",
+      500,
+    );
+  }
+  ui.text(
+    online
+      ? host
+        ? "房主修改后立即同步到房间内所有玩家"
+        : "由房主决定并同步，当前为只读"
+      : "练习设置仅本机生效",
+    x + 16,
+    speedY + 52,
+    13,
+    colors.sage500,
+    "left",
+    500,
+    width - 32,
+  );
 }
 
 function drawCountdown(ui: Ui, model: HudModel) {

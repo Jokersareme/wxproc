@@ -1,6 +1,6 @@
 {
   "name": "friend-billiards",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "A GPL-3.0 WeChat mini game with eight-ball, nine-ball, snooker and authoritative friend rooms.",
   "license": "GPL-3.0-only",

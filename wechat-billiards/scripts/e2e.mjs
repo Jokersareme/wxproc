@@ -167,6 +167,38 @@ try {
   if (startingOnHost.room.startAt === null)
     throw new Error("倒计时缺少 startAt");
 
+  const settingsStartHost = host.messages.length;
+  const settingsStartGuest = guest.messages.length;
+  host.send({
+    type: "updateRoomSettings",
+    matchId,
+    playbackSpeed: 2,
+    cameraViews: ["top", "follow"],
+  });
+  const settingsOnHost = await host.wait(
+    (m) => m.type === "room" && m.room.playbackSpeed === 2,
+    settingsStartHost,
+  );
+  const settingsOnGuest = await guest.wait(
+    (m) => m.type === "room" && m.room.playbackSpeed === 2,
+    settingsStartGuest,
+  );
+  if (
+    settingsOnHost.room.cameraViews.join(",") !== "top,follow" ||
+    settingsOnGuest.room.cameraViews.join(",") !== "top,follow"
+  )
+    throw new Error("房间设置未同步到双端");
+  const guestSettingsError = await guest.request(
+    {
+      type: "updateRoomSettings",
+      matchId,
+      playbackSpeed: 1.5,
+    },
+    (m) => m.type === "error",
+  );
+  if (!guestSettingsError.message.includes("房主"))
+    throw new Error("非房主修改房间设置未被拒绝");
+
   const playing = await guest.wait(
     (m) => m.type === "room" && m.room.status === "playing",
     guest.messages.length - 1,
@@ -317,9 +349,11 @@ try {
   );
   if (
     rematchOnHost.room.predictionLevel !== 4 ||
-    rematchPlaying.room.predictionLevel !== 4
+    rematchPlaying.room.predictionLevel !== 4 ||
+    rematchOnHost.room.playbackSpeed !== 2 ||
+    rematchPlaying.room.playbackSpeed !== 2
   )
-    throw new Error("再来一局双端预测线档位不一致");
+    throw new Error("再来一局双端房间设置不一致");
 
   reconnected.close();
   reconnectedGuest.close();
@@ -341,6 +375,7 @@ try {
           "idempotency",
           "prediction-invalid-level",
           "prediction-persisted",
+          "room-settings-sync",
           "repeat-ball-in-hand",
           "restart-restore",
           "concede",

@@ -22,6 +22,14 @@ export const MAX_MESSAGE_BYTES = 64 * 1024;
 
 export type RoomMode = "classic" | "cards" | "threeSnooker";
 export type RoomStatus = "trial" | "starting" | "playing" | "gameOver";
+export type RoomCameraView = "top" | "follow" | "overview";
+export const ROOM_CAMERA_VIEWS: RoomCameraView[] = [
+  "top",
+  "follow",
+  "overview",
+];
+export const ROOM_PLAYBACK_SPEEDS = [1.15, 1.5, 2] as const;
+export const DEFAULT_ROOM_PLAYBACK_SPEED = ROOM_PLAYBACK_SPEEDS[0];
 
 export class ProtocolError extends Error {
   constructor(
@@ -45,11 +53,20 @@ export type ClientMessage = BaseMessage &
         type: "createRoom";
         gameType: GameType;
         predictionLevel: number;
+        playbackSpeed?: number;
+        cameraViews?: RoomCameraView[];
         mode?: RoomMode;
         cardCount?: number;
       }
     | { type: "joinRoom"; roomCode: string; inviteToken: string }
     | { type: "ready"; roomCode: string; ready: boolean }
+    | {
+        type: "updateRoomSettings";
+        matchId: string;
+        predictionLevel?: number;
+        playbackSpeed?: number;
+        cameraViews?: RoomCameraView[];
+      }
     | { type: "placeBall"; matchId: string; x: number; y: number }
     | { type: "nominateFreeBall"; matchId: string; ballId: number }
     | { type: "shoot"; matchId: string; shotId: string; input: ShotInput }
@@ -76,6 +93,8 @@ export interface RoomState {
   mode: RoomMode;
   cardCount: number;
   predictionLevel: number;
+  playbackSpeed: number;
+  cameraViews: RoomCameraView[];
   status: RoomStatus;
   playerCount: number;
   maxPlayers: 2 | 3;
@@ -140,6 +159,27 @@ function validShot(value: unknown): value is ShotInput {
   );
 }
 
+function validPlaybackSpeed(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    (ROOM_PLAYBACK_SPEEDS as readonly number[]).includes(value)
+  );
+}
+
+function validCameraViews(value: unknown): value is RoomCameraView[] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= ROOM_CAMERA_VIEWS.length &&
+    value.every(
+      (entry) =>
+        typeof entry === "string" &&
+        ROOM_CAMERA_VIEWS.includes(entry as RoomCameraView),
+    ) &&
+    new Set(value).size === value.length
+  );
+}
+
 export function parseClientMessage(value: unknown): ClientMessage {
   if (!isObject(value)) throw new Error("消息必须是对象");
   if (value.protocolVersion !== PROTOCOL_VERSION)
@@ -181,6 +221,17 @@ export function parseClientMessage(value: unknown): ClientMessage {
         (predictionLevel as number) > 5
       )
         throw new Error("预测线档位无效");
+      const playbackSpeed =
+        value.playbackSpeed === undefined
+          ? DEFAULT_ROOM_PLAYBACK_SPEED
+          : value.playbackSpeed;
+      if (!validPlaybackSpeed(playbackSpeed))
+        throw new Error("快速播放档位无效");
+      const cameraViews =
+        value.cameraViews === undefined
+          ? [...ROOM_CAMERA_VIEWS]
+          : value.cameraViews;
+      if (!validCameraViews(cameraViews)) throw new Error("视角设置无效");
       const requestedCards =
         value.cardCount === undefined
           ? mode === "cards"
@@ -198,6 +249,8 @@ export function parseClientMessage(value: unknown): ClientMessage {
         type: "createRoom",
         gameType: value.gameType as GameType,
         predictionLevel: predictionLevel as number,
+        playbackSpeed,
+        cameraViews: cameraViews as RoomCameraView[],
         mode,
         cardCount: mode === "cards" ? (requestedCards as number) : 0,
       };
@@ -227,6 +280,37 @@ export function parseClientMessage(value: unknown): ClientMessage {
         roomCode: value.roomCode as string,
         ready: value.ready,
       };
+    case "updateRoomSettings": {
+      if (!string(value.matchId, 64)) throw new Error("房间设置消息无效");
+      const hasPrediction = value.predictionLevel !== undefined;
+      const hasPlayback = value.playbackSpeed !== undefined;
+      const hasViews = value.cameraViews !== undefined;
+      if (!hasPrediction && !hasPlayback && !hasViews)
+        throw new Error("房间设置没有变化");
+      if (hasPrediction) {
+        const level = value.predictionLevel;
+        if (!Number.isInteger(level) || (level as number) < 0 || (level as number) > 5)
+          throw new Error("预测线档位无效");
+      }
+      if (hasPlayback && !validPlaybackSpeed(value.playbackSpeed))
+        throw new Error("快速播放档位无效");
+      if (hasViews && !validCameraViews(value.cameraViews))
+        throw new Error("视角设置无效");
+      return {
+        ...base,
+        type: "updateRoomSettings",
+        matchId: value.matchId,
+        ...(hasPrediction
+          ? { predictionLevel: value.predictionLevel as number }
+          : {}),
+        ...(hasPlayback
+          ? { playbackSpeed: value.playbackSpeed as number }
+          : {}),
+        ...(hasViews
+          ? { cameraViews: value.cameraViews as RoomCameraView[] }
+          : {}),
+      };
+    }
     case "placeBall":
       if (!string(value.matchId, 64) || !finite(value.x) || !finite(value.y))
         throw new Error("母球摆放消息无效");

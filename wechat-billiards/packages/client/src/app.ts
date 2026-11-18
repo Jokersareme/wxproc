@@ -19,7 +19,7 @@ import { TableRenderer } from "./renderer";
 import { clientToDesign } from "./ui/layout";
 import { menuMetrics } from "./ui/screens/game";
 import {
-  DEFAULT_PLAYBACK_SPEED,
+  normalisePlaybackSpeed,
   playbackDuration,
   PLAYBACK_SPEEDS,
 } from "./playback";
@@ -35,6 +35,7 @@ import {
   motionStorageKey,
   mutedStorageKey,
   parseCameraViews,
+  playbackSpeedStorageKey,
   qualityStorageKey,
   volumeStorageKey,
 } from "./quality";
@@ -84,6 +85,8 @@ export class GameApp {
   private animating = false;
   private onlineMatch = false;
   private practicePredictionLevel = 0;
+  private practiceCameraViews: CameraMode[];
+  private practicePlaybackSpeed: number;
   private pendingInvitation?: { roomCode: string; inviteToken: string };
   private pendingCreate?: GameType;
   private toastTimer?: ReturnType<typeof setTimeout>;
@@ -118,6 +121,10 @@ export class GameApp {
     const cameraViews = parseCameraViews(
       platform.getStorage(cameraViewsStorageKey),
     );
+    this.practiceCameraViews = [...cameraViews];
+    this.practicePlaybackSpeed = normalisePlaybackSpeed(
+      Number(platform.getStorage(playbackSpeedStorageKey)),
+    );
     this.cameraMode = cameraViews[0];
     const muted = platform.getStorage(mutedStorageKey) === "1";
     const volume = Number(platform.getStorage(volumeStorageKey));
@@ -141,7 +148,7 @@ export class GameApp {
       canShoot: false,
       animating: false,
       canSkip: false,
-      playbackSpeed: DEFAULT_PLAYBACK_SPEED,
+      playbackSpeed: this.practicePlaybackSpeed,
       online: false,
       sourceUrl: options.sourceUrl,
       message: undefined,
@@ -150,6 +157,8 @@ export class GameApp {
       spinOpen: false,
       soundOn: !muted,
       createPredictionLevel: 0,
+      createPlaybackSpeed: this.practicePlaybackSpeed,
+      createCameraViews: [...this.practiceCameraViews],
       predictionLevel: 0,
       practicePredictionLevel: 0,
       practiceMode: false,
@@ -577,6 +586,32 @@ export class GameApp {
         this.model.createPredictionLevel > 0 ? 0 : 3;
     } else if (action.startsWith("prediction:")) {
       this.model.createPredictionLevel = Number(action.split(":")[1]);
+    } else if (action.startsWith("createPlayback:")) {
+      this.model.createPlaybackSpeed = normalisePlaybackSpeed(
+        Number(action.split(":")[1]),
+      );
+    } else if (action.startsWith("createCameraView:")) {
+      const mode = action.split(":")[1];
+      if (isCameraMode(mode)) {
+        const views = this.model.createCameraViews;
+        if (views.includes(mode)) {
+          if (views.length === 1) this.showToast("至少保留一个视角");
+          else
+            this.model.createCameraViews = views.filter(
+              (entry) => entry !== mode,
+            );
+        } else {
+          this.model.createCameraViews = cameraModes.filter(
+            (entry) => entry === mode || views.includes(entry),
+          );
+        }
+      }
+    } else if (action.startsWith("roomPrediction:")) {
+      const level = Math.max(
+        0,
+        Math.min(5, Number(action.split(":")[1]) || 0),
+      );
+      this.updateRoomSettings({ predictionLevel: level });
     } else if (action.startsWith("practicePrediction:")) {
       const level = Math.max(
         0,
@@ -696,7 +731,13 @@ export class GameApp {
     } else if (action.startsWith("playback:")) {
       const speed = Number(action.split(":")[1]);
       if ((PLAYBACK_SPEEDS as readonly number[]).includes(speed)) {
-        this.model.playbackSpeed = speed;
+        if (this.canEditRoomSettings()) {
+          this.updateRoomSettings({ playbackSpeed: speed });
+        } else if (!this.onlineMatch) {
+          this.practicePlaybackSpeed = speed;
+          this.model.playbackSpeed = speed;
+          this.platform.setStorage(playbackSpeedStorageKey, String(speed));
+        }
       }
     } else if (action === "skipShot") {
       this.table.skipAnimation();
@@ -841,6 +882,53 @@ export class GameApp {
     this.redraw();
   }
 
+  private canEditRoomSettings() {
+    return this.onlineMatch && Boolean(this.room) && this.playerIndex === 0;
+  }
+
+  private updateRoomSettings(patch: {
+    predictionLevel?: number;
+    playbackSpeed?: number;
+    cameraViews?: CameraMode[];
+  }) {
+    if (!this.room) return;
+    if (!this.canEditRoomSettings()) {
+      this.showToast("只有房主可以修改房间设置");
+      return;
+    }
+    if (patch.predictionLevel !== undefined) {
+      this.model.predictionLevel = patch.predictionLevel;
+      this.table.setPredictionLevel(patch.predictionLevel);
+    }
+    if (patch.playbackSpeed !== undefined)
+      this.model.playbackSpeed = patch.playbackSpeed;
+    if (patch.cameraViews) {
+      this.model.cameraViews = cameraModes.filter((mode) =>
+        patch.cameraViews!.includes(mode),
+      );
+      if (!this.model.cameraViews.includes(this.cameraMode))
+        this.setCameraMode(this.model.cameraViews[0]);
+    }
+    this.network.send({
+      type: "updateRoomSettings",
+      matchId: this.room.matchId,
+      ...patch,
+    });
+    this.redraw();
+  }
+
+  private applyRoomSettings(room: RoomState) {
+    this.model.predictionLevel = room.predictionLevel ?? 0;
+    this.table.setPredictionLevel(this.model.predictionLevel);
+    this.model.playbackSpeed = normalisePlaybackSpeed(room.playbackSpeed);
+    const views = cameraModes.filter((mode) =>
+      (room.cameraViews ?? []).includes(mode),
+    );
+    this.model.cameraViews = views.length ? views : [...cameraModes];
+    if (!this.model.cameraViews.includes(this.cameraMode))
+      this.setCameraMode(this.model.cameraViews[0]);
+  }
+
   private setCameraMode(mode: CameraMode) {
     const allowed = this.model.cameraViews;
     const next = allowed.includes(mode) ? mode : (allowed[0] ?? "top");
@@ -852,6 +940,35 @@ export class GameApp {
 
   private toggleCameraView(mode: CameraMode) {
     if (!isCameraMode(mode)) return;
+    if (this.onlineMatch) {
+      if (!this.canEditRoomSettings()) {
+        if (this.model.cameraViews.includes(mode)) this.setCameraMode(mode);
+        else this.showToast("房主未开放该视角");
+        return;
+      }
+      const allowed = this.model.cameraViews;
+      if (!allowed.includes(mode)) {
+        this.updateRoomSettings({
+          cameraViews: cameraModes.filter(
+            (entry) => entry === mode || allowed.includes(entry),
+          ),
+        });
+        this.setCameraMode(mode);
+        return;
+      }
+      if (this.cameraMode !== mode) {
+        this.setCameraMode(mode);
+        return;
+      }
+      if (allowed.length === 1) {
+        this.showToast("至少保留一个视角");
+        return;
+      }
+      const next = allowed.filter((entry) => entry !== mode);
+      this.updateRoomSettings({ cameraViews: next });
+      this.setCameraMode(next[0]);
+      return;
+    }
     const allowed = this.model.cameraViews;
     if (!allowed.includes(mode)) {
       this.setCameraViews([...allowed, mode]);
@@ -872,7 +989,10 @@ export class GameApp {
   }
 
   private setCameraViews(views: CameraMode[]) {
-    this.model.cameraViews = cameraModes.filter((mode) => views.includes(mode));
+    this.practiceCameraViews = cameraModes.filter((mode) =>
+      views.includes(mode),
+    );
+    this.model.cameraViews = [...this.practiceCameraViews];
     this.platform.setStorage(
       cameraViewsStorageKey,
       this.model.cameraViews.join(","),
@@ -894,6 +1014,8 @@ export class GameApp {
       type: "createRoom",
       gameType,
       predictionLevel: this.model.createPredictionLevel,
+      playbackSpeed: this.model.createPlaybackSpeed,
+      cameraViews: this.model.createCameraViews,
       mode: "classic",
       cardCount: 0,
     });
@@ -918,6 +1040,8 @@ export class GameApp {
     this.model.spinY = 0;
     this.model.predictionLevel = this.practicePredictionLevel;
     this.model.practicePredictionLevel = this.practicePredictionLevel;
+    this.model.cameraViews = [...this.practiceCameraViews];
+    this.model.playbackSpeed = this.practicePlaybackSpeed;
     this.model.practiceMode = true;
     this.model.homeSheet = null;
     this.homeSheetStartedAt = undefined;
@@ -1106,8 +1230,7 @@ export class GameApp {
       this.model.message = message.snapshot.lastMessage;
       this.model.practiceMode =
         message.room.status === "trial" && message.snapshot.practice;
-      this.model.predictionLevel = message.room.predictionLevel ?? 0;
-      this.table.setPredictionLevel(this.model.predictionLevel);
+      this.applyRoomSettings(message.room);
       this.saveLastRoom(message.room);
       this.table.setPresentation("game");
       if (enteringGame) {
@@ -1149,6 +1272,7 @@ export class GameApp {
       this.model.trial =
         message.room.status === "trial" && message.snapshot.practice;
       this.model.countdownEnd = null;
+      this.applyRoomSettings(message.room);
       this.table.setPresentation("game");
       try {
         const engine = MatchEngine.restore(message.preSnapshot);
@@ -1250,6 +1374,8 @@ export class GameApp {
     this.model.creating = false;
     this.model.practiceMode = false;
     this.model.predictionLevel = 0;
+    this.model.cameraViews = [...this.practiceCameraViews];
+    this.model.playbackSpeed = this.practicePlaybackSpeed;
     this.model.spinX = 0;
     this.model.spinY = 0;
     this.model.showHint = false;

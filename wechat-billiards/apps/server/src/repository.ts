@@ -10,6 +10,7 @@ import cloudbase from "@cloudbase/node-sdk";
 import type { GameType, MatchSnapshot } from "@friend-billiards/core";
 import type {
   PlayerIndex,
+  RoomCameraView,
   RoomMode,
   RoomStatus,
   ServerMessage,
@@ -35,6 +36,8 @@ export interface RoomRecord {
   matchId: string;
   gameType: GameType;
   predictionLevel: number;
+  playbackSpeed: number;
+  cameraViews: RoomCameraView[];
   mode: RoomMode;
   cardCount: number;
   maxPlayers: 2 | 3;

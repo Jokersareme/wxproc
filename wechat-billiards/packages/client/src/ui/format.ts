@@ -21,12 +21,21 @@ export function predictionName(level?: number) {
   return `${level} 档`;
 }
 
+const snookerColours = ["黄球", "绿球", "棕球", "蓝球", "粉球", "黑球"];
+
+function snookerColourName(id: number) {
+  return snookerColours[id - 1] ?? `${id} 号球`;
+}
+
 export function snookerTarget(snapshot: MatchSnapshot) {
   if (snapshot.target.freeBall)
-    return snapshot.target.nominatedBall ? "自由球已提名" : "请提名自由球";
-  if (snapshot.target.targetIsRed) return "目标：红球";
-  if (snapshot.target.previousPotRed) return "目标：任意彩球";
-  return "按顺序清彩";
+    return snapshot.target.nominatedBall
+      ? `自由球：${snookerColourName(snapshot.target.nominatedBall)}`
+      : "自由球：请提名";
+  if (snapshot.target.respottedBlack) return "黑球（重摆决胜）";
+  if (snapshot.target.targetIsRed) return "红球";
+  if (snapshot.target.previousPotRed) return "任意彩球";
+  return snookerColourName(snapshot.target.nextColour);
 }
 
 export function remainingGroupBalls(
@@ -91,7 +100,7 @@ export function playerSubline(snapshot: MatchSnapshot, player: 0 | 1) {
   return `${groupName(group)} · 剩 ${remainingGroupBalls(snapshot, player)}`;
 }
 
-export function targetLabel(snapshot: MatchSnapshot) {
+export function targetBrief(snapshot: MatchSnapshot) {
   if (snapshot.gameType === "snooker") return snookerTarget(snapshot);
   if (snapshot.gameType === "nineball") {
     const lowest = snapshot.balls
@@ -105,11 +114,22 @@ export function targetLabel(snapshot: MatchSnapshot) {
       )
       .map((ball) => ball.label!)
       .sort((a, b) => a - b)[0];
-    return lowest ? `目标 ${lowest} 号` : "清台中";
+    return lowest ? `${lowest} 号球` : "清台中";
   }
   const player = snapshot.currentPlayer;
   const group = snapshot.groups[player];
-  if (group === "open") return "开放球局";
-  if (remainingGroupBalls(snapshot, player) === 0) return "目标 8 号";
-  return `目标 ${groupName(group)}`;
+  if (group === "open") return "任意球";
+  if (remainingGroupBalls(snapshot, player) === 0) return "黑 8";
+  return groupName(group);
+}
+
+export function targetLabel(snapshot: MatchSnapshot) {
+  if (snapshot.gameType === "snooker" && snapshot.target.freeBall)
+    return snookerTarget(snapshot);
+  if (
+    snapshot.gameType === "eightball" &&
+    snapshot.groups[snapshot.currentPlayer] === "open"
+  )
+    return "目标：任意球（先进定色）";
+  return `目标：${targetBrief(snapshot)}`;
 }

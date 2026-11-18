@@ -279,6 +279,13 @@ async function main() {
       await sleep(300);
       await screenshot(`${size.name}-home-settings`);
       await clickButton("settingsClose");
+      await clickButton("friend");
+      await waitFor("billiards.model.screen === 'friend'");
+      await sleep(500);
+      await screenshot(`${size.name}-friend`);
+      await clickButton("back");
+      await waitFor("billiards.model.screen === 'home'");
+      await sleep(300);
 
       await evaluate(
         "localStorage.setItem('billiards.lastRoom', JSON.stringify({roomCode:'123456',gameType:'eightball'}))",
@@ -311,6 +318,9 @@ async function main() {
       await clickButton("menu");
       await sleep(300);
       await screenshot(`${size.name}-game-menu`);
+      await clickButton("roomSettings");
+      await sleep(300);
+      await screenshot(`${size.name}-game-roomsettings`);
       await clickButton("quality:low");
       await sleep(600);
       await screenshot(`${size.name}-game-quality-low`);
@@ -388,7 +398,7 @@ async function main() {
         `页面出现异常：${JSON.stringify(cdp.exceptions.slice(0, 3))}`,
       );
     console.log(
-      `视觉验收截图完成：${sizes.length * (skipRoom ? 15 : 19)} 张，输出 ${outputDir}`,
+      `视觉验收截图完成：${sizes.length * (skipRoom ? 17 : 21)} 张，输出 ${outputDir}`,
     );
   } finally {
     cdp?.socket.close();
