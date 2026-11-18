@@ -200,7 +200,7 @@ https://hc-billiards-349228-8-1534449846.sh.run.tcloudbase.com/health
 - 微信端：`apps/minigame/dist/game.js`（993,470 字节）
 - 浏览器端：`apps/web-preview/dist/game.js`
 - 服务端：`apps/server/dist/index.cjs`
-- 对应源码归档：`release/friend-billiards-corresponding-source.tar.gz`（743,060 字节）
+- 对应源码归档：`release/friend-billiards-corresponding-source.tar.gz`（743,059 字节）
 - 云托管部署包：`release/cloudrun-0.4.0/`（协议 v2，根目录包含 `Dockerfile`）
 
 `hc-billiards` 已于 2026-11-18 升级到部署版本 `hc-billiards-008`（协议 v2，支持 `playCard/card`、`bestBreak/pots/cards` 快照和三人房状态机），健康接口返回 `ok: true`；部署保留了原环境变量、1 核 2GB 和单实例配置，`008` 已接管 100% 流量。
