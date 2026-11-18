@@ -198,9 +198,9 @@ export class TableRenderer {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.12;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.setClearColor(0x22372f, 1);
+    this.renderer.setClearColor(0x2b453b, 1);
     this.camera = new THREE.PerspectiveCamera(38, 16 / 9, 0.01, 100);
     this.camera.up.set(0, 0, 1);
     this.topCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
@@ -543,7 +543,7 @@ export class TableRenderer {
     }
     const viewport = this.viewportScreen();
     this.renderer.setClearColor(
-      this.presentation === "room" ? 0x061a16 : 0x22372f,
+      this.presentation === "room" ? 0x061a16 : 0x2b453b,
       1,
     );
     this.renderer.autoClear = false;
@@ -650,9 +650,9 @@ export class TableRenderer {
   }
 
   private buildLights() {
-    const ambient = new THREE.HemisphereLight(0xe8fff4, 0x13241d, 0.6);
+    const ambient = new THREE.HemisphereLight(0xe8fff4, 0x1b3329, 0.92);
     this.scene.add(ambient);
-    const key = new THREE.SpotLight(0xffe7c2, 14, 0, 0.7, 0.4, 1);
+    const key = new THREE.SpotLight(0xffe7c2, 15, 0, 0.75, 0.45, 1);
     key.position.set(0, 0, 2.2);
     key.target.position.set(0, 0, 0);
     key.castShadow = true;
@@ -660,9 +660,12 @@ export class TableRenderer {
     key.shadow.camera.near = 0.5;
     key.shadow.camera.far = 4;
     this.scene.add(key, key.target);
-    const fill = new THREE.DirectionalLight(0xb8d8ff, 0.8);
+    const fill = new THREE.DirectionalLight(0xb8d8ff, 1.05);
     fill.position.set(2, 1, 2);
     this.scene.add(fill);
+    const corner = new THREE.DirectionalLight(0xffe3b8, 0.35);
+    corner.position.set(-2, -2, 1.6);
+    this.scene.add(corner);
     return key;
   }
 
@@ -703,8 +706,8 @@ export class TableRenderer {
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(frameWidth * 2, frameHeight * 2, 0.16),
       new THREE.MeshStandardMaterial({
-        color: 0x4a2417,
-        roughness: 0.35,
+        color: 0x5b3020,
+        roughness: 0.32,
         metalness: 0.05,
       }),
     );
@@ -746,8 +749,8 @@ export class TableRenderer {
     this.tableGroup.add(floorShadow);
 
     const pocketMaterial = new THREE.MeshStandardMaterial({
-      color: 0x010303,
-      roughness: 1,
+      color: 0x101d19,
+      roughness: 0.95,
       side: THREE.DoubleSide,
     });
     const cupDepth = d.ballRadius * 3.2;
@@ -776,9 +779,9 @@ export class TableRenderer {
       const ring = new THREE.Mesh(
         new THREE.TorusGeometry(radius * 0.96, d.ballRadius * 0.05, 8, 36),
         new THREE.MeshStandardMaterial({
-          color: 0x1b120d,
-          roughness: 0.5,
-          metalness: 0.3,
+          color: 0x7a5634,
+          roughness: 0.42,
+          metalness: 0.4,
         }),
       );
       ring.position.set(x, y, -d.ballRadius * 0.02);
@@ -786,10 +789,10 @@ export class TableRenderer {
       const net = new THREE.Mesh(
         new THREE.ConeGeometry(radius * 0.94, cupDepth * 0.8, 20, 1, true),
         new THREE.MeshStandardMaterial({
-          color: 0x050807,
+          color: 0x0d1714,
           roughness: 1,
           transparent: true,
-          opacity: 0.6,
+          opacity: 0.5,
           side: THREE.DoubleSide,
         }),
       );
@@ -799,11 +802,13 @@ export class TableRenderer {
     });
 
     const mouthMaterial = new THREE.MeshBasicMaterial({
-      color: 0x010303,
+      color: 0x13221d,
       side: THREE.DoubleSide,
     });
-    const rimMaterial = new THREE.MeshBasicMaterial({
-      color: 0x1b120d,
+    const rimMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8a6338,
+      roughness: 0.45,
+      metalness: 0.35,
       side: THREE.DoubleSide,
     });
     pockets.forEach(({ x, y, radius }) => {
@@ -1257,7 +1262,10 @@ export class TableRenderer {
   }
 
   private ballTexture(ball: BallSnapshot, gameType: string) {
-    const key = `${gameType}:${ball.label ?? 0}:${ball.id >= 7 ? "red" : "normal"}`;
+    const key =
+      gameType === "snooker"
+        ? `snooker:${ball.id >= 7 ? "red" : ball.id}`
+        : `${gameType}:${ball.label ?? 0}`;
     const cached = this.ballTextureCache.get(key);
     if (cached) return cached;
     const canvas = this.platform.createCanvas(256, 128);
@@ -1743,10 +1751,10 @@ export class TableRenderer {
     const viewport = this.viewportDesign();
     const aspect = Math.max(0.5, viewport.width / Math.max(1, viewport.height));
     const d = tableDimensions();
-    let halfHeight = d.outerHalfHeight / 0.88;
+    let halfHeight = d.outerHalfHeight / 0.96;
     let halfWidth = halfHeight * aspect;
-    if (halfWidth < d.outerHalfWidth / 0.88) {
-      halfWidth = d.outerHalfWidth / 0.88;
+    if (halfWidth < d.outerHalfWidth / 0.96) {
+      halfWidth = d.outerHalfWidth / 0.96;
       halfHeight = halfWidth / aspect;
     }
     this.topCamera.left = -halfWidth;

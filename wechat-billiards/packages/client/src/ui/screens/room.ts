@@ -28,17 +28,16 @@ export function drawRoom(ui: Ui, model: HudModel) {
     "left",
     700,
   );
-  const shareWidth = 120;
-  const copyWidth = 120;
-  const shareX = layout.width - margin - shareWidth;
-  ui.button("share", "分享邀请", shareX, top + 18, shareWidth, 44, {
-    accent: true,
-    fontSize: 16,
-  });
-  ui.button("copyCode", "复制码", shareX - copyWidth - 10, top + 18, copyWidth, 44, {
-    ghost: true,
-    fontSize: 16,
-  });
+  const codeWidth = 6 * 24;
+  ui.button(
+    "copyCode",
+    "复制",
+    titleX + labelWidth + 12 + codeWidth + 12,
+    top + 20,
+    88,
+    40,
+    { ghost: true, fontSize: 14 },
+  );
 
   const modeName =
     model.room?.mode === "cards"

@@ -2,6 +2,7 @@ import { Vector3 } from "three";
 import {
   cueBallPlacementLegal,
   MatchEngine,
+  nearestLegalCueBallPosition,
   stopSlowBall,
   validateShotInput,
 } from "./engine";
@@ -286,5 +287,34 @@ describe("MatchEngine", () => {
     const snooker = new MatchEngine({ gameType: "snooker" }).snapshot();
     expect(cueBallPlacementLegal(snooker, Rack.baulk + 0.05, 0)).toBe(false);
     expect(cueBallPlacementLegal(snooker, Rack.baulk - 0.1, 0.1)).toBe(true);
+  });
+
+  it("snaps an illegal cue-ball drop to the nearest legal spot", () => {
+    const engine = new MatchEngine({ gameType: "eightball" });
+    const snapshot = engine.snapshot();
+    expect(nearestLegalCueBallPosition(snapshot, 0, 0)).toEqual({ x: 0, y: 0 });
+
+    const occupied = snapshot.balls[1].pos;
+    const overBall = nearestLegalCueBallPosition(
+      snapshot,
+      occupied[0] + 0.005,
+      occupied[1],
+    );
+    expect(overBall).not.toBeNull();
+    expect(
+      cueBallPlacementLegal(snapshot, overBall!.x, overBall!.y),
+    ).toBe(true);
+
+    const outside = nearestLegalCueBallPosition(snapshot, 10, 0);
+    expect(outside).not.toBeNull();
+    expect(
+      cueBallPlacementLegal(snapshot, outside!.x, outside!.y),
+    ).toBe(true);
+
+    const snooker = new MatchEngine({ gameType: "snooker" }).snapshot();
+    const inD = nearestLegalCueBallPosition(snooker, Rack.baulk + 0.2, 0.2);
+    expect(inD).not.toBeNull();
+    expect(cueBallPlacementLegal(snooker, inD!.x, inD!.y)).toBe(true);
+    expect(inD!.x).toBeLessThanOrEqual(Rack.baulk);
   });
 });

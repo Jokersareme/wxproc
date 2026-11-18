@@ -6,6 +6,7 @@ import {
   safeRight,
   safeTop,
   tableViewport,
+  type Layout,
 } from "../layout";
 import type { CameraMode, HudModel } from "../model";
 import { colors, radius, typeScale, withAlpha } from "../theme";
@@ -22,6 +23,7 @@ const SLIDER_TOP = 190;
 const SLIDER_HEIGHT = 320;
 const SLIDER_WIDTH = 44;
 const SIDE_MARGIN = 24;
+const FINE_SIDE_MARGIN = 64;
 const SPIN_RADIUS = 120;
 
 export function drawGame(ui: Ui, model: HudModel) {
@@ -63,11 +65,12 @@ function drawTopBar(
   const { layout } = ui;
   const cardHeight = 64;
   const cardWidth = layout.compact ? 300 : 360;
-  ui.button("menu", "菜单", safeLeft(layout) + 16, top + 16, 56, 56, {
+  const left = safeLeft(layout);
+  ui.button("menu", "菜单", left + 16, top + 16, 56, 56, {
     ghost: true,
     fontSize: 14,
   });
-  const soundX = layout.width - safeRight(layout) - 16 - 56;
+  const soundX = left + 80;
   ui.button("sound", "音效", soundX, top + 16, 56, 56, {
     ghost: true,
     fontSize: 14,
@@ -133,7 +136,7 @@ function drawTopBar(
     return;
   }
 
-  const leftX = margin;
+  const leftX = Math.max(margin, safeLeft(layout) + 144);
   const rightX = layout.width - margin - cardWidth;
   const players = model.room?.players ?? [];
   [0, 1].forEach((index) => {
@@ -246,7 +249,8 @@ function statusTone(status: string, snapshot: MatchSnapshot) {
 function drawSliders(ui: Ui, model: HudModel) {
   const { layout } = ui;
   const left = safeLeft(layout) + SIDE_MARGIN;
-  const right = layout.width - safeRight(layout) - SIDE_MARGIN - SLIDER_WIDTH;
+  const right =
+    layout.width - safeRight(layout) - FINE_SIDE_MARGIN - SLIDER_WIDTH;
   ui.text("力度", left + 22, SLIDER_TOP - 22, 16, colors.sage300, "center", 600);
   ui.powerSlider(
     "power",
@@ -507,42 +511,109 @@ function cameraLabel(mode: CameraMode) {
   return cameraOptions.find((option) => option.id === mode)?.label ?? "2D 俯视";
 }
 
+const MENU_ROW = 50;
+
+export interface MenuMetrics {
+  y: number;
+  height: number;
+  contentTop: number;
+  contentBottom: number;
+  maxScroll: number;
+}
+
+function menuContentHeight(expanded: boolean) {
+  return (
+    8 +
+    (expanded ? 224 : 44) +
+    12 +
+    MENU_ROW * 4 +
+    16 +
+    1 +
+    14 +
+    36 +
+    12 +
+    46 +
+    24 +
+    12
+  );
+}
+
+export function menuMetrics(layout: Layout, expanded: boolean): MenuMetrics {
+  const height = Math.min(expanded ? 620 : 520, layout.height - 64);
+  const y = layout.height - height;
+  const contentTop = y + 74;
+  const contentBottom = y + height - 72;
+  const view = Math.max(1, contentBottom - contentTop);
+  return {
+    y,
+    height,
+    contentTop,
+    contentBottom,
+    maxScroll: Math.max(0, menuContentHeight(expanded) - view),
+  };
+}
+
 function drawMenu(ui: Ui, model: HudModel) {
   const { layout } = ui;
   const margin = gutter(layout);
   const expanded = model.roomSettingsOpen;
-  const height = expanded ? 640 : 432;
-  const y = layout.height - height;
+  const metrics = menuMetrics(layout, expanded);
+  const scroll = Math.max(0, Math.min(metrics.maxScroll, model.menuScroll));
   ui.modal(
-    { x: 0, y, width: layout.width, height },
+    { x: 0, y: metrics.y, width: layout.width, height: metrics.height },
     {
       radius: 0,
       opacity: 0.985,
       stroke: withAlpha(colors.ivory100, 0.14),
     },
   );
-  ui.drawerHandle(0, y, layout.width);
-  ui.text("菜单", margin, y + 46, typeScale.h2, colors.ivory100, "left", 700);
+  ui.drawerHandle(0, metrics.y, layout.width);
+  ui.text("菜单", margin, metrics.y + 46, typeScale.h2, colors.ivory100, "left", 700);
+  ui.text(
+    "上下拖动浏览",
+    layout.width - margin,
+    metrics.y + 48,
+    13,
+    colors.sage500,
+    "right",
+    500,
+  );
+  ui.divider(0, metrics.contentTop - 2, layout.width);
 
-  drawRoomSettings(ui, model, margin, y + 78, layout.width - margin * 2, expanded);
+  const firstButton = ui.buttons.length;
+  ui.save();
+  ui.context.beginPath();
+  ui.context.rect(
+    0,
+    metrics.contentTop,
+    layout.width,
+    metrics.contentBottom - metrics.contentTop,
+  );
+  ui.context.clip();
 
-  const rowY = y + (expanded ? 330 : 152);
+  let y = metrics.contentTop + 8 - scroll;
+  drawRoomSettings(ui, model, margin, y, layout.width - margin * 2, expanded);
+  y += expanded ? 224 : 44;
+  y += 12;
+
   const rowX = layout.width - margin - 120;
-  ui.text("音效", margin, rowY, 17, colors.ivory100, "left", 600);
-  ui.pill("sound", model.soundOn ? "开" : "关", rowX, rowY - 20, 120, 38, model.soundOn);
+  ui.text("音效", margin, y + 25, 17, colors.ivory100, "left", 600);
+  ui.pill("sound", model.soundOn ? "开" : "关", rowX, y + 4, 120, 38, model.soundOn);
+  y += MENU_ROW;
 
-  ui.text("减少动态效果", margin, rowY + 52, 17, colors.ivory100, "left", 600);
+  ui.text("减少动态效果", margin, y + 25, 17, colors.ivory100, "left", 600);
   ui.pill(
     "motion",
     model.reduceMotion ? "开" : "关",
     rowX,
-    rowY + 32,
+    y + 4,
     120,
     38,
     model.reduceMotion,
   );
+  y += MENU_ROW;
 
-  ui.text("画质", margin, rowY + 104, 17, colors.ivory100, "left", 600);
+  ui.text("画质", margin, y + 25, 17, colors.ivory100, "left", 600);
   ui.tabs(
     "quality",
     [
@@ -551,13 +622,14 @@ function drawMenu(ui: Ui, model: HudModel) {
       { id: "low", label: "低" },
     ],
     rowX - 120,
-    rowY + 84,
+    y + 4,
     240,
     38,
     model.quality,
   );
+  y += MENU_ROW;
 
-  ui.text("快速播放", margin, rowY + 156, 17, colors.ivory100, "left", 600);
+  ui.text("快速播放", margin, y + 25, 17, colors.ivory100, "left", 600);
   ui.tabs(
     "playback",
     [
@@ -566,51 +638,107 @@ function drawMenu(ui: Ui, model: HudModel) {
       { id: "2", label: "2×" },
     ],
     rowX - 120,
-    rowY + 136,
+    y + 4,
     240,
     38,
     String(model.playbackSpeed),
   );
+  y += MENU_ROW;
 
-  const actionY = y + height - 58;
-  ui.button("license", "规则", margin, actionY - 40, 88, 36, {
+  y += 16;
+  ui.divider(margin, y, layout.width - margin * 2);
+  y += 14;
+  ui.button("license", "规则", margin, y, 88, 36, {
     ghost: true,
     fontSize: 15,
   });
+  y += 48;
 
   if (model.trial) {
-    ui.button("restart", "重新摆球", margin, actionY, 140, 46, {
+    ui.button("restart", "重新摆球", margin, y, 140, 46, {
       ghost: true,
       fontSize: 16,
     });
-    ui.button("leave", "离开房间", margin + 152, actionY, 140, 46, {
+    ui.button("leave", "离开房间", margin + 152, y, 140, 46, {
       danger: true,
       fontSize: 16,
     });
   } else if (model.practiceMode) {
-    ui.button("restart", "重新摆球", margin, actionY, 140, 46, {
+    ui.button("restart", "重新摆球", margin, y, 140, 46, {
       ghost: true,
       fontSize: 16,
     });
-    ui.button("exit", "退出对局", margin + 152, actionY, 140, 46, {
+    ui.button("exit", "退出对局", margin + 152, y, 140, 46, {
       danger: true,
       fontSize: 16,
     });
   } else {
-    ui.button("concede", "认输", margin, actionY, 120, 46, {
+    ui.button("concede", "认输", margin, y, 120, 46, {
       danger: true,
       fontSize: 16,
     });
-    ui.button("exit", "退出对局", margin + 132, actionY, 140, 46, {
+    ui.button("exit", "退出对局", margin + 132, y, 140, 46, {
       danger: true,
       fontSize: 16,
     });
   }
+  ui.text(
+    "设置立即生效 · 上下拖动查看更多",
+    margin,
+    y + 62,
+    13,
+    colors.sage500,
+    "left",
+    500,
+  );
+
+  for (let index = ui.buttons.length - 1; index >= firstButton; index -= 1) {
+    const button = ui.buttons[index];
+    if (
+      button.y + button.height < metrics.contentTop ||
+      button.y > metrics.contentBottom
+    ) {
+      ui.buttons.splice(index, 1);
+    } else {
+      button.clipTop = metrics.contentTop;
+      button.clipBottom = metrics.contentBottom;
+    }
+  }
+  ui.restore();
+
+  if (metrics.maxScroll > 0) {
+    const trackTop = metrics.contentTop + 8;
+    const trackHeight = metrics.contentBottom - metrics.contentTop - 16;
+    const thumbHeight = Math.max(
+      40,
+      trackHeight *
+        (1 - metrics.maxScroll / menuContentHeight(expanded)),
+    );
+    const thumbTop =
+      trackTop +
+      (trackHeight - thumbHeight) *
+        (scroll / Math.max(1, metrics.maxScroll));
+    ui.context.fillStyle = withAlpha(colors.ivory100, 0.14);
+    ui.path(layout.width - 6, trackTop, 3, trackHeight, 2);
+    ui.context.fill();
+    ui.context.fillStyle = withAlpha(colors.brass300, 0.6);
+    ui.path(layout.width - 7, thumbTop, 4, thumbHeight, 2);
+    ui.context.fill();
+  }
+
+  ui.context.fillStyle = withAlpha(colors.ink900, 0.99);
+  ui.context.fillRect(
+    0,
+    metrics.contentBottom,
+    layout.width,
+    metrics.height - (metrics.contentBottom - metrics.y),
+  );
+  ui.divider(0, metrics.contentBottom, layout.width);
   ui.button(
     "closeModal",
     "返回台面",
     layout.width - margin - 200,
-    actionY,
+    metrics.y + metrics.height - 62,
     200,
     48,
     { accent: true, fontSize: 18 },

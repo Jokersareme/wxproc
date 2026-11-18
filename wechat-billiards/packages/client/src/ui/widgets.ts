@@ -20,6 +20,8 @@ export interface UiButton {
   disabled?: boolean;
   accent?: boolean;
   danger?: boolean;
+  clipTop?: number;
+  clipBottom?: number;
 }
 
 export interface ButtonOptions {

@@ -2,6 +2,7 @@ import {
   cueBallPlacementLegal,
   hashSnapshot,
   MatchEngine,
+  nearestLegalCueBallPosition,
   tableDimensions,
   type GameType,
   type MatchSnapshot,
@@ -15,6 +16,8 @@ import { Hud, type HudModel } from "./hud";
 import { NetworkClient } from "./network";
 import type { ClientPlatform, TouchPoint } from "./platform";
 import { TableRenderer } from "./renderer";
+import { clientToDesign } from "./ui/layout";
+import { menuMetrics } from "./ui/screens/game";
 import {
   DEFAULT_PLAYBACK_SPEED,
   playbackDuration,
@@ -48,7 +51,14 @@ export interface GameAppOptions {
   autoConnect?: boolean;
 }
 
-type Gesture = "aim" | "power" | "fineAim" | "spin" | "place" | null;
+type Gesture =
+  | "aim"
+  | "power"
+  | "fineAim"
+  | "spin"
+  | "place"
+  | "menuScroll"
+  | null;
 
 interface StoredRoom {
   roomCode: string;
@@ -92,6 +102,10 @@ export class GameApp {
   private lastCameraMoving = false;
   private lastLoggedMessage = "";
   private foulFlashTimer?: ReturnType<typeof setTimeout>;
+  private menuPendingAction?: string;
+  private menuStartY = 0;
+  private menuStartScroll = 0;
+  private menuMoved = false;
 
   constructor(
     private readonly platform: ClientPlatform,
@@ -132,6 +146,7 @@ export class GameApp {
       sourceUrl: options.sourceUrl,
       message: undefined,
       menuOpen: false,
+      menuScroll: 0,
       spinOpen: false,
       soundOn: !muted,
       createPredictionLevel: 0,
@@ -330,6 +345,26 @@ export class GameApp {
       this.touchMove(point);
       return;
     }
+    if (this.menuHandlesTouch()) {
+      const design = clientToDesign(point.x, point.y, this.hud.layout);
+      const metrics = menuMetrics(
+        this.hud.layout,
+        this.model.roomSettingsOpen,
+      );
+      if (design.y >= metrics.y) {
+        this.gesture = "menuScroll";
+        this.menuStartY = point.y;
+        this.menuStartScroll = this.model.menuScroll;
+        this.menuMoved = false;
+        this.menuPendingAction =
+          action && action !== "modalMask" ? action : undefined;
+        this.lastPoint = point;
+        return;
+      }
+      this.closeModals();
+      this.redraw();
+      return;
+    }
     if (action) {
       void this.action(action);
       return;
@@ -404,6 +439,18 @@ export class GameApp {
       this.model.spinX = spin.x;
       this.model.spinY = spin.y;
       this.syncAim();
+    } else if (this.gesture === "menuScroll") {
+      const scale = this.hud.layout.height / this.platform.height;
+      const delta = (point.y - this.menuStartY) * scale;
+      const metrics = menuMetrics(
+        this.hud.layout,
+        this.model.roomSettingsOpen,
+      );
+      this.model.menuScroll = Math.max(
+        0,
+        Math.min(metrics.maxScroll, this.menuStartScroll - delta),
+      );
+      if (Math.abs(delta) > 8) this.menuMoved = true;
     } else if (this.gesture === "aim") {
       this.aimAt(point);
     } else if (this.gesture === "place" && this.snapshot) {
@@ -420,7 +467,7 @@ export class GameApp {
         this.lastPlacementLegal = legal;
         this.model.message = legal
           ? "自由球：拖动白球到合法位置"
-          : "此处不能放球，请换一个位置";
+          : "此处不能放球，松手会移到最近的合法位置";
       }
     }
     this.lastPoint = point;
@@ -428,8 +475,30 @@ export class GameApp {
   }
 
   private touchEnd(point: TouchPoint) {
+    if (this.gesture === "menuScroll") {
+      const pending = this.menuPendingAction;
+      const moved = this.menuMoved;
+      this.gesture = null;
+      this.lastPoint = undefined;
+      this.menuPendingAction = undefined;
+      this.menuMoved = false;
+      if (!moved && pending) void this.action(pending);
+      return;
+    }
     if (this.gesture === "place" && this.snapshot) {
-      const position = this.table.screenToTable(point.x, point.y);
+      const dropped = this.table.screenToTable(point.x, point.y);
+      const snapped = cueBallPlacementLegal(
+        this.snapshot,
+        dropped.x,
+        dropped.y,
+      )
+        ? undefined
+        : nearestLegalCueBallPosition(
+            this.snapshot,
+            dropped.x,
+            dropped.y,
+          );
+      const position = snapped ?? dropped;
       if (
         !cueBallPlacementLegal(this.snapshot, position.x, position.y)
       ) {
@@ -453,8 +522,12 @@ export class GameApp {
               position.y,
               this.playerIndex,
             );
-            this.model.message = this.snapshot.lastMessage ?? undefined;
             this.table.sync(this.snapshot);
+          }
+          if (snapped) {
+            this.model.message = "已移到最近的合法位置";
+          } else if (!this.onlineMatch) {
+            this.model.message = this.snapshot.lastMessage ?? undefined;
           }
         } catch (error: any) {
           this.model.message = error.message;
@@ -588,6 +661,11 @@ export class GameApp {
         this.network.send({ type: "concede", matchId: this.room.matchId });
         this.model.message = "已认输，等待结算";
       }
+    } else if (action === "confirmYes") {
+      const confirmed = this.model.confirm?.action;
+      this.model.confirm = null;
+      if (confirmed) await this.action(confirmed);
+      return;
     } else if (action === "exitConfirm") {
       this.model.confirm = null;
       if (this.onlineMatch && this.room) this.leaveRoom();
@@ -596,6 +674,7 @@ export class GameApp {
       this.model.confirm = null;
     } else if (action === "menu") {
       this.model.menuOpen = true;
+      this.model.menuScroll = 0;
       this.audio.playUi("open");
     } else if (action === "spinButton") {
       this.model.spinOpen = true;
@@ -685,6 +764,7 @@ export class GameApp {
       this.audio.playUi("close");
     } else if (action === "roomSettings") {
       this.model.roomSettingsOpen = !this.model.roomSettingsOpen;
+      this.model.menuScroll = 0;
       this.audio.playUi(this.model.roomSettingsOpen ? "open" : "close");
     } else if (action.startsWith("cameraView:")) {
       this.toggleCameraView(action.split(":")[1] as CameraMode);
@@ -1129,11 +1209,22 @@ export class GameApp {
 
   private closeModals() {
     this.model.menuOpen = false;
+    this.model.menuScroll = 0;
     this.model.spinOpen = false;
     this.model.confirm = null;
     this.model.eventLogOpen = false;
     this.model.roomSettingsOpen = false;
     this.model.roomOverlayOpen = false;
+  }
+
+  private menuHandlesTouch() {
+    return Boolean(
+      this.model.menuOpen &&
+      !this.model.spinOpen &&
+      !this.model.confirm &&
+      !this.model.eventLogOpen &&
+      !this.model.roomOverlayOpen,
+    );
   }
 
   private leaveRoom() {

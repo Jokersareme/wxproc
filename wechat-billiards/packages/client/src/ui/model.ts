@@ -34,6 +34,7 @@ export interface HudModel {
   online: boolean;
   sourceUrl: string;
   menuOpen: boolean;
+  menuScroll: number;
   spinOpen: boolean;
   soundOn: boolean;
   createPredictionLevel: number;

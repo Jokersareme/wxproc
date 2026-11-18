@@ -1,6 +1,7 @@
 export {
   cueBallPlacementLegal,
   MatchEngine,
+  nearestLegalCueBallPosition,
   PHYSICS_STEP,
   stopSlowBall,
   validateShotInput,

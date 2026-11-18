@@ -80,7 +80,7 @@ export function drawLicense(ui: Ui, model: HudModel) {
     width,
   );
   ui.text(
-    "欢畅台球 v0.3.1 · GPL-3.0-only",
+    "欢畅台球 v0.3.2 · GPL-3.0-only",
     margin,
     noteY + 24,
     13,

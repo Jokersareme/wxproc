@@ -78,9 +78,9 @@ describe("responsive layout", () => {
   it("keeps the game table inside the 2-player viewport", () => {
     const layout = computeLayout(1280, 720, 1);
     const rect = tableViewport(layout);
-    expect(rect.x).toBeCloseTo(120, 10);
-    expect(rect.y).toBeCloseTo(104, 10);
-    expect(rect.width).toBeCloseTo(1040, 10);
-    expect(rect.height).toBeCloseTo(520, 10);
+    expect(rect.x).toBeCloseTo(100, 10);
+    expect(rect.y).toBeCloseTo(102, 10);
+    expect(rect.width).toBeCloseTo(1080, 10);
+    expect(rect.height).toBeCloseTo(540, 10);
   });
 });

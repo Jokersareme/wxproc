@@ -5,7 +5,7 @@ import { colors, radius, typeScale, withAlpha } from "../theme";
 import type { Ui } from "../widgets";
 import { gameName } from "../format";
 
-const CLIENT_VERSION = "v0.3.1";
+const CLIENT_VERSION = "v0.3.2";
 
 interface Card {
   id: string;
@@ -71,29 +71,23 @@ export function drawHome(ui: Ui, model: HudModel) {
     colors.sage300,
   );
 
-  const settingsSize = 56;
-  const settingsY = top + 28;
-  const menuLimit = layout.menu
-    ? layout.menu.x - 12 - settingsSize
-    : Number.POSITIVE_INFINITY;
-  const settingsX = Math.max(
-    margin,
-    Math.min(layout.width - margin - settingsSize, menuLimit),
-  );
+  const settingsSize = 48;
+  const settingsY = top + 12;
+  const settingsX = margin;
   ui.button("settings", "设置", settingsX, settingsY, settingsSize, settingsSize, {
     ghost: true,
-    fontSize: 16,
+    fontSize: 15,
   });
+  const onlineX = settingsX + settingsSize + 12;
   const onlineWidth = Math.min(
     layout.compact ? 150 : 180,
-    Math.max(0, settingsX - margin - 12),
+    layout.width - margin - onlineX,
   );
-  const onlineX = settingsX - onlineWidth - 12;
   ui.panel(
     onlineX,
     settingsY + 4,
     onlineWidth,
-    44,
+    40,
     0.78,
     radius.pill,
     colors.ink800,
@@ -102,20 +96,20 @@ export function drawHome(ui: Ui, model: HudModel) {
       : withAlpha(colors.sage500, 0.3),
   );
   ui.dot(
-    onlineX + 20,
-    settingsY + 26,
+    onlineX + 18,
+    settingsY + 24,
     5,
     model.online ? colors.success400 : colors.sage500,
   );
   ui.text(
     model.online ? "联机可用" : "离线，仅练习",
-    onlineX + 34,
-    settingsY + 27,
+    onlineX + 32,
+    settingsY + 25,
     14,
     model.online ? colors.success400 : colors.sage300,
     "left",
     600,
-    onlineWidth - 42,
+    onlineWidth - 40,
   );
   ui.buttons.push({
     id: "online",
@@ -123,13 +117,13 @@ export function drawHome(ui: Ui, model: HudModel) {
     x: onlineX,
     y: settingsY,
     width: onlineWidth,
-    height: 48,
+    height: 44,
   });
   if (!model.online && model.message)
     ui.text(
       model.message,
       layout.width - margin,
-      settingsY + 62,
+      settingsY + 56,
       13,
       withAlpha(colors.danger400, 0.9),
       "right",

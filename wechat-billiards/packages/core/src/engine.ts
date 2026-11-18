@@ -78,6 +78,89 @@ export function cueBallPlacementLegal(
   );
 }
 
+/**
+ * Snap a dropped cue ball to the closest legal spot. The search starts at the
+ * requested point (clamped to the table / snooker D) and expands in rings, so
+ * releasing over a cushion or another ball still leaves the cue in a playable
+ * position instead of resetting to the previous one.
+ */
+export function nearestLegalCueBallPosition(
+  snapshot: Pick<MatchSnapshot, "gameType" | "balls">,
+  x: number,
+  y: number,
+): { x: number; y: number } | null {
+  const clearance = 0.0001;
+  const maxX = TableGeometry.tableX - R - clearance;
+  const maxY = TableGeometry.tableY - R - clearance;
+  const clamp = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, value));
+  const project = (px: number, py: number) => {
+    let nx = Number.isFinite(px) ? clamp(px, -maxX, maxX) : 0;
+    let ny = Number.isFinite(py) ? clamp(py, -maxY, maxY) : 0;
+    if (snapshot.gameType === "snooker") {
+      const baulk = Rack.baulk - clearance;
+      const sixth = Rack.sixth - clearance;
+      nx = Math.min(nx, baulk);
+      const dx = nx - Rack.baulk;
+      const dy = ny;
+      const distance = Math.hypot(dx, dy);
+      if (distance > sixth) {
+        if (distance < 1e-9) {
+          nx = baulk - sixth;
+          ny = 0;
+        } else {
+          nx = Rack.baulk + (dx / distance) * sixth;
+          ny = (dy / distance) * sixth;
+        }
+      }
+    }
+    return { x: nx, y: ny };
+  };
+  const legal = (px: number, py: number) => {
+    if (Math.abs(px) > maxX || Math.abs(py) > maxY) return false;
+    if (snapshot.gameType === "snooker") {
+      if (px > Rack.baulk - clearance) return false;
+      if (Math.hypot(px - Rack.baulk, py) > Rack.sixth - clearance)
+        return false;
+    }
+    return !snapshot.balls.some(
+      (ball) =>
+        ball.id !== 0 &&
+        ball.state !== "InPocket" &&
+        Math.hypot(ball.pos[0] - px, ball.pos[1] - py) < 2 * R + clearance,
+    );
+  };
+
+  const start = project(x, y);
+  if (legal(start.x, start.y)) return start;
+
+  const step = Math.max(0.006, R * 0.35);
+  const maxRadius = Math.hypot(maxX, maxY) * 2 + step;
+  for (let radius = step; radius <= maxRadius; radius += step) {
+    const samples = Math.max(16, Math.ceil((2 * Math.PI * radius) / step));
+    let best: { x: number; y: number } | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < samples; index += 1) {
+      const angle = (index / samples) * Math.PI * 2;
+      const candidate = project(
+        start.x + Math.cos(angle) * radius,
+        start.y + Math.sin(angle) * radius,
+      );
+      if (!legal(candidate.x, candidate.y)) continue;
+      const distance = Math.hypot(
+        candidate.x - start.x,
+        candidate.y - start.y,
+      );
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = candidate;
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
 (globalThis as { __BILLIARDS_HEADLESS__?: boolean }).__BILLIARDS_HEADLESS__ =
   true;
 

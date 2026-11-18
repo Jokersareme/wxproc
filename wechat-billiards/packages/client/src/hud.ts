@@ -17,7 +17,7 @@ import type { ClientPlatform } from "./platform";
 import { clampSpin, SPIN_LIMIT } from "./spin";
 
 const SLIDER_TOP = 190;
-const SLIDER_HEIGHT = 370;
+const SLIDER_HEIGHT = 320;
 const SPIN_RADIUS = 120;
 
 export type { HudModel } from "./ui/model";
@@ -118,7 +118,9 @@ export class Hud {
           point.x >= candidate.x &&
           point.x <= candidate.x + candidate.width &&
           point.y >= candidate.y &&
-          point.y <= candidate.y + candidate.height,
+          point.y <= candidate.y + candidate.height &&
+          (candidate.clipTop === undefined || point.y >= candidate.clipTop) &&
+          (candidate.clipBottom === undefined || point.y <= candidate.clipBottom),
       );
     return button && !button.disabled ? button.id : null;
   }
