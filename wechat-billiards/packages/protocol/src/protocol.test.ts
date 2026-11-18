@@ -1,4 +1,8 @@
-import { parseClientMessage, PROTOCOL_VERSION } from "./index";
+import {
+  parseClientMessage,
+  PROTOCOL_VERSION,
+  ProtocolError,
+} from "./index";
 
 const base = { protocolVersion: PROTOCOL_VERSION };
 
@@ -30,6 +34,25 @@ describe("protocol validation", () => {
     ).toThrow();
   });
 
+  it("accepts a six-digit room code with an empty invite token", () => {
+    const message = parseClientMessage({
+      ...base,
+      type: "joinRoom",
+      roomCode: "123456",
+      inviteToken: "",
+    }) as any;
+    expect(message.type).toBe("joinRoom");
+    expect(message.inviteToken).toBe("");
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "joinRoom",
+        roomCode: "123456",
+        inviteToken: 42,
+      }),
+    ).toThrow();
+  });
+
   it("defaults the prediction level to off and rejects invalid levels", () => {
     const defaulted = parseClientMessage({
       ...base,
@@ -56,6 +79,65 @@ describe("protocol validation", () => {
         }),
       ).toThrow("预测线档位");
     }
+  });
+
+  it("is protocol v2 and rejects v1 clients with a clear code", () => {
+    expect(PROTOCOL_VERSION).toBe(2);
+    try {
+      parseClientMessage({ type: "ping", protocolVersion: 1 });
+      throw new Error("expected rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ProtocolError);
+      expect((error as ProtocolError).code).toBe("PROTOCOL_VERSION");
+      expect((error as Error).message).toBe("请更新到最新版本");
+    }
+  });
+
+  it("validates room mode and card count defaults", () => {
+    const classic = parseClientMessage({
+      ...base,
+      type: "createRoom",
+      gameType: "nineball",
+    }) as any;
+    expect(classic.mode).toBe("classic");
+    expect(classic.cardCount).toBe(0);
+
+    const cards = parseClientMessage({
+      ...base,
+      type: "createRoom",
+      gameType: "eightball",
+      mode: "cards",
+    }) as any;
+    expect(cards.cardCount).toBe(3);
+    expect(
+      (
+        parseClientMessage({
+          ...base,
+          type: "createRoom",
+          gameType: "eightball",
+          mode: "cards",
+          cardCount: 6,
+        }) as any
+      ).cardCount,
+    ).toBe(6);
+
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "createRoom",
+        gameType: "eightball",
+        mode: "threeSnooker",
+      }),
+    ).toThrow("三人模式");
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "createRoom",
+        gameType: "eightball",
+        mode: "cards",
+        cardCount: 7,
+      }),
+    ).toThrow("卡牌数量");
   });
 
   it("rejects non-finite physics values and unknown commands", () => {

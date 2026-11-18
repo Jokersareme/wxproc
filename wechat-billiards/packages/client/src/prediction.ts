@@ -1,8 +1,9 @@
 import { Vector3 } from "three";
-import { PHYSICS_STEP, tunedMaxPower } from "@friend-billiards/core";
+import { PHYSICS_STEP, STOP_SPEED, tunedMaxPower } from "@friend-billiards/core";
 import { Ball, State } from "../../../third_party/billiards/src/model/ball";
 import { Collision } from "../../../third_party/billiards/src/model/physics/collision";
 import { cueStrike } from "../../../third_party/billiards/src/model/physics/physics";
+import { spinToCueOffset } from "./spin";
 
 export interface Point2 {
   x: number;
@@ -21,6 +22,11 @@ export interface PredictionStroke {
   spinY: number;
 }
 
+export interface PredictionBounds {
+  halfWidth: number;
+  halfHeight: number;
+}
+
 export interface FirstBallPrediction {
   ballId: number;
   contact: Point2;
@@ -29,6 +35,49 @@ export interface FirstBallPrediction {
   incoming: Point2;
   normal: Point2;
   tangent: Point2 | null;
+}
+
+/**
+ * Clamp the far end of a segment to the play area. The first boundary hit is
+ * either a cushion or a pocket mouth, so the returned point is where a
+ * predicted ball would leave the cloth.
+ */
+export function clipSegmentToBounds(
+  start: Point2,
+  end: Point2,
+  bounds: PredictionBounds,
+): Point2 {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  let t = 1;
+  if (dx > 1e-9) t = Math.min(t, (bounds.halfWidth - start.x) / dx);
+  if (dx < -1e-9) t = Math.min(t, (-bounds.halfWidth - start.x) / dx);
+  if (dy > 1e-9) t = Math.min(t, (bounds.halfHeight - start.y) / dy);
+  if (dy < -1e-9) t = Math.min(t, (-bounds.halfHeight - start.y) / dy);
+  const clamped = Math.max(0, Math.min(1, t));
+  return { x: start.x + dx * clamped, y: start.y + dy * clamped };
+}
+
+/** Trim a polyline at the first point that reaches the play-area boundary. */
+export function clipPathToBounds(
+  points: Point2[],
+  bounds: PredictionBounds,
+): Point2[] {
+  if (points.length < 2) return points;
+  const clipped: Point2[] = [points[0]];
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1];
+    const end = points[index];
+    const stop = clipSegmentToBounds(start, end, bounds);
+    clipped.push(stop);
+    if (
+      Math.abs(stop.x - end.x) > 1e-9 ||
+      Math.abs(stop.y - end.y) > 1e-9
+    ) {
+      break;
+    }
+  }
+  return clipped;
 }
 
 export function maxPredictionLength(outerHalfWidth: number): number {
@@ -122,10 +171,11 @@ function physicalCuePath(
   length: number,
   stroke: PredictionStroke,
 ): Point2[] | null {
+  const cueOffset = spinToCueOffset(stroke.spinX, stroke.spinY);
   const strike = cueStrike(
     Math.atan2(prediction.incoming.y, prediction.incoming.x),
     stroke.power * tunedMaxPower(),
-    new Vector3(-stroke.spinX, -stroke.spinY, 0),
+    new Vector3(cueOffset.x, cueOffset.y, 0),
   );
   const cue = new Ball(
     new Vector3(prediction.cueStart.x, prediction.cueStart.y, 0),
@@ -164,7 +214,7 @@ function physicalCuePath(
     }
 
     postCollisionSteps += 1;
-    if (Math.hypot(cue.vel.x, cue.vel.y) < 0.008) return path;
+    if (Math.hypot(cue.vel.x, cue.vel.y) < STOP_SPEED) return path;
     if (postCollisionSteps % 8 !== 0 && cue.inMotion()) continue;
     const current = {
       x: cue.pos.x + offset.x,
@@ -196,6 +246,7 @@ export function predictionSegments(
   prediction: FirstBallPrediction,
   length: number,
   stroke?: PredictionStroke,
+  bounds?: PredictionBounds,
 ): { normal: [Point2, Point2]; tangent: Point2[] | null } {
   const impact = Math.max(
     0,
@@ -206,6 +257,10 @@ export function predictionSegments(
     ),
   );
   const normalLength = length * (0.25 + 0.75 * impact);
+  const normalEnd = {
+    x: prediction.contact.x + prediction.normal.x * normalLength,
+    y: prediction.contact.y + prediction.normal.y * normalLength,
+  };
   const cueLength = length * (1 - 0.5 * impact);
   const geometricPath = prediction.tangent
     ? [
@@ -216,16 +271,18 @@ export function predictionSegments(
         },
       ]
     : null;
+  const rawTangent = stroke
+    ? (physicalCuePath(prediction, cueLength, stroke) ?? geometricPath)
+    : geometricPath;
+  const tangent =
+    rawTangent && bounds ? clipPathToBounds(rawTangent, bounds) : rawTangent;
   return {
     normal: [
       prediction.contact,
-      {
-        x: prediction.contact.x + prediction.normal.x * normalLength,
-        y: prediction.contact.y + prediction.normal.y * normalLength,
-      },
+      bounds
+        ? clipSegmentToBounds(prediction.contact, normalEnd, bounds)
+        : normalEnd,
     ],
-    tangent: stroke
-      ? (physicalCuePath(prediction, cueLength, stroke) ?? geometricPath)
-      : geometricPath,
+    tangent: tangent && tangent.length > 1 ? tangent : null,
   };
 }

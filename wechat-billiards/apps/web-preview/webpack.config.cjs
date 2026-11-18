@@ -22,7 +22,18 @@ module.exports = {
     },
   },
   plugins: [
-    new CopyPlugin({ patterns: [{ from: path.resolve(__dirname, "public"), to: "." }] }),
+    new CopyPlugin({
+      patterns: [
+        { from: path.resolve(__dirname, "public"), to: "." },
+        {
+          from: path.resolve(
+            __dirname,
+            "../../third_party/billiards/dist/sounds",
+          ),
+          to: "sounds",
+        },
+      ],
+    }),
     new webpack.DefinePlugin({ __SOURCE_URL__: JSON.stringify(process.env.SOURCE_URL ?? "") }),
   ],
   devServer: {
@@ -30,7 +41,9 @@ module.exports = {
     host: "0.0.0.0",
     port: 8081,
     hot: false,
-    proxy: [{ context: ["/ws"], target: "ws://localhost:8080", ws: true }],
+    liveReload: false,
+    webSocketServer: false,
+    proxy: [{ context: ["/ws"], target: "ws://127.0.0.1:8080", ws: true }],
   },
   performance: { hints: false },
   experiments: { typescript: false },

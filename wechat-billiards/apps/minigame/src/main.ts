@@ -1,7 +1,10 @@
 import {
   GameApp,
   type ClientPlatform,
+  type PlatformInsets,
+  type PlatformRect,
   type PlatformSocket,
+  type PlatformSound,
   type ShareInvitation,
   type TouchPoint,
 } from "@friend-billiards/client";
@@ -12,10 +15,106 @@ declare const __CLOUD_SERVICE__: string;
 declare const __SOURCE_URL__: string;
 declare const __LOCAL_SERVER_URL__: string;
 
+class WeChatSound implements PlatformSound {
+  private readonly pool: any[] = [];
+  private index = 0;
+  private muted = false;
+  private toneContext?: any;
+
+  preload() {
+    return Promise.resolve();
+  }
+
+  play(name: string, volume: number) {
+    if (this.muted) return;
+    if (this.pool.length === 0) {
+      for (let index = 0; index < 6; index += 1) {
+        const context = wx.createInnerAudioContext?.();
+        if (!context) return;
+        context.obeyMuteSwitch = false;
+        context.autoplay = false;
+        this.pool.push(context);
+      }
+    }
+    const context = this.pool[this.index % this.pool.length];
+    this.index += 1;
+    try {
+      context.stop();
+      context.src = `dist/sounds/${name}.ogg`;
+      context.volume = Math.max(0, Math.min(1, volume));
+      context.play();
+    } catch {
+      /* sound is optional */
+    }
+  }
+
+  tone(kind: "tap" | "open" | "close" | "error" | "countdown") {
+    if (this.muted) return;
+    const context = (this.toneContext ??= wx.createWebAudioContext?.());
+    if (!context) return;
+    const spec = {
+      tap: { frequency: 660, duration: 0.05, type: "sine" },
+      open: { frequency: 480, duration: 0.09, type: "sine" },
+      close: { frequency: 320, duration: 0.08, type: "sine" },
+      error: { frequency: 180, duration: 0.16, type: "square" },
+      countdown: { frequency: 880, duration: 0.08, type: "triangle" },
+    }[kind];
+    try {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = spec.type;
+      oscillator.frequency.value = spec.frequency;
+      gain.gain.setValueAtTime(0.045, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(
+        0.001,
+        context.currentTime + spec.duration,
+      );
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + spec.duration);
+    } catch {
+      /* tone is optional */
+    }
+  }
+
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    if (muted) this.pool.forEach((context) => context.stop?.());
+  }
+
+  dispose() {
+    this.pool.splice(0).forEach((context) => context.destroy?.());
+  }
+}
+
 class WeChatPlatform implements ClientPlatform {
   readonly canvas = wx.createCanvas();
   private readonly info = wx.getWindowInfo?.() ?? wx.getSystemInfoSync();
+  private readonly sound = new WeChatSound();
+  readonly safeArea: PlatformInsets;
+  readonly menuButton?: PlatformRect;
   private invitation?: ShareInvitation;
+
+  constructor() {
+    const safe = this.info.safeArea;
+    this.safeArea = safe
+      ? {
+          top: Math.max(0, safe.top),
+          left: Math.max(0, safe.left),
+          right: Math.max(0, this.info.windowWidth - safe.right),
+          bottom: Math.max(0, this.info.windowHeight - safe.bottom),
+        }
+      : { top: 0, right: 0, bottom: 0, left: 0 };
+    const menu = wx.getMenuButtonBoundingClientRect?.();
+    this.menuButton =
+      menu && menu.width > 0 && menu.height > 0 ? menu : undefined;
+  }
+
+  get benchmarkLevel(): number | undefined {
+    const level = wx.getDeviceInfo?.()?.benchmarkLevel;
+    return typeof level === "number" ? level : undefined;
+  }
 
   get width() {
     return this.info.windowWidth;
@@ -107,6 +206,14 @@ class WeChatPlatform implements ClientPlatform {
     });
   }
 
+  copyText(text: string) {
+    wx.setClipboardData?.({ data: text });
+  }
+
+  createSound() {
+    return this.sound;
+  }
+
   getStorage(key: string) {
     try {
       return wx.getStorageSync(key) || "";
@@ -136,8 +243,15 @@ class WeChatPlatform implements ClientPlatform {
     oscillator.stop(context.currentTime + 0.08);
     oscillator.onended = () => context.close?.();
   }
-  vibrate() {
-    wx.vibrateShort?.({ type: "light" });
+  vibrate(kind: "light" | "medium" | "heavy" | "success" = "light") {
+    if (kind === "success") {
+      wx.vibrateShort?.({ type: "light" });
+      setTimeout(() => wx.vibrateShort?.({ type: "light" }), 90);
+      return;
+    }
+    wx.vibrateShort?.({
+      type: kind === "light" ? "light" : kind === "heavy" ? "heavy" : "medium",
+    });
   }
 
   defaultShare() {

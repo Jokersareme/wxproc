@@ -1,13 +1,21 @@
-import { MatchEngine, validateShotInput } from "./engine";
-import { Outcome } from "../../../third_party/billiards/src/model/outcome";
-import { State } from "../../../third_party/billiards/src/model/ball";
+import { Vector3 } from "three";
 import {
+  cueBallPlacementLegal,
+  MatchEngine,
+  stopSlowBall,
+  validateShotInput,
+} from "./engine";
+import { Outcome } from "../../../third_party/billiards/src/model/outcome";
+import { Ball, State } from "../../../third_party/billiards/src/model/ball";
+import { Rack } from "../../../third_party/billiards/src/utils/rack";
+import {
+  e as hanRestitution,
   ee,
   maxPower,
   mu,
   muS,
 } from "../../../third_party/billiards/src/model/physics/constants";
-import { GAME_PHYSICS, tunedMaxPower } from "./tuning";
+import { GAME_PHYSICS, STOP_SPEED, tunedMaxPower } from "./tuning";
 import { ShotInput } from "./types";
 
 const straightShot: ShotInput = {
@@ -38,6 +46,18 @@ describe("MatchEngine", () => {
     expect(engine.snapshot().phase).toBe("aiming");
   });
 
+  it("scatters at least four object balls on a full-power eight-ball break", () => {
+    const engine = new MatchEngine({ gameType: "eightball", practice: true });
+    const result = engine.shoot({ ...straightShot, power: 1 }, 0);
+    const objectCushions = new Set(
+      result.events
+        .filter((event) => event.type === "cushion" && event.ballA !== 0)
+        .map((event) => event.ballA),
+    );
+    expect(objectCushions.size).toBeGreaterThanOrEqual(4);
+    expect(result.ruleEvents.some((event) => event.type === "foul")).toBe(false);
+  });
+
   it.each(["eightball", "nineball", "snooker"] as const)(
     "applies the shared physics tuning for %s before and after a shot",
     (gameType) => {
@@ -45,13 +65,72 @@ describe("MatchEngine", () => {
       expect(mu).toBe(GAME_PHYSICS.rollingFriction);
       expect(muS).toBe(GAME_PHYSICS.slidingFriction);
       expect(ee).toBe(GAME_PHYSICS.cushionRestitution);
+      expect(hanRestitution).toBe(GAME_PHYSICS.cushionRestitution);
       expect(tunedMaxPower()).toBeCloseTo(maxPower * GAME_PHYSICS.powerScale, 10);
       engine.shoot({ ...straightShot, power: 0.1 }, 0);
       expect(mu).toBe(GAME_PHYSICS.rollingFriction);
       expect(muS).toBe(GAME_PHYSICS.slidingFriction);
       expect(ee).toBe(GAME_PHYSICS.cushionRestitution);
+      expect(hanRestitution).toBe(GAME_PHYSICS.cushionRestitution);
     },
   );
+
+  it("migrates a v1 snapshot into the v2 player arrays", () => {
+    const engine = new MatchEngine({ gameType: "eightball" });
+    const legacy = engine.snapshot() as any;
+    legacy.version = 1;
+    delete legacy.playerCount;
+    delete legacy.eliminated;
+    delete legacy.ranking;
+    delete legacy.target.nextColour;
+    const restored = MatchEngine.restore(legacy);
+    expect(restored.state.version).toBe(2);
+    expect(restored.state.playerCount).toBe(2);
+    expect(restored.state.players).toHaveLength(2);
+    expect(restored.state.groups).toHaveLength(2);
+    expect(restored.state.scores).toHaveLength(2);
+    expect(restored.state.eliminated).toEqual([false, false]);
+    expect(restored.state.ranking).toEqual([]);
+    expect(restored.state.target.nextColour).toBeGreaterThanOrEqual(1);
+  });
+
+  it("cycles through three players and skips eliminated seats", () => {
+    const engine = new MatchEngine({
+      gameType: "snooker",
+      playerCount: 3,
+      playerNames: ["甲", "乙", "丙"],
+    });
+    expect(engine.state.playerCount).toBe(3);
+    const switchPlayer = (engine as any).switchPlayer.bind(engine);
+    switchPlayer([]);
+    expect(engine.state.currentPlayer).toBe(1);
+    switchPlayer([]);
+    expect(engine.state.currentPlayer).toBe(2);
+    switchPlayer([]);
+    expect(engine.state.currentPlayer).toBe(0);
+    engine.state.eliminated[1] = true;
+    switchPlayer([]);
+    expect(engine.state.currentPlayer).toBe(2);
+    switchPlayer([]);
+    expect(engine.state.currentPlayer).toBe(0);
+  });
+
+  it("settles balls below the shared stop speed", () => {
+    const slow = new Ball(new Vector3(0, 0, 0));
+    slow.state = State.Rolling;
+    slow.vel.set(STOP_SPEED - 0.001, 0, 0);
+    slow.rvel.set(2, 0, 0);
+    expect(stopSlowBall(slow)).toBe(true);
+    expect(slow.state).toBe(State.Stationary);
+    expect(slow.vel.length()).toBe(0);
+    expect(slow.rvel.length()).toBe(0);
+
+    const moving = new Ball(new Vector3(0, 0, 0));
+    moving.state = State.Rolling;
+    moving.vel.set(STOP_SPEED, 0, 0);
+    expect(stopSlowBall(moving)).toBe(false);
+    expect(moving.state).toBe(State.Rolling);
+  });
 
   it("rejects invalid power and excessive spin", () => {
     expect(validateShotInput({ ...straightShot, power: 0 })).toBeTruthy();
@@ -129,6 +208,21 @@ describe("MatchEngine", () => {
     expect(events.some((event: any) => event.type === "groups")).toBe(true);
   });
 
+  it("announces a legal eight-ball break with no pot", () => {
+    const engine = new MatchEngine({ gameType: "eightball" });
+    const cue = engine.table.cueball;
+    const objectBalls = engine.table.balls.filter((ball) => ball.id !== 0);
+    const outcomes = [
+      Outcome.collision(cue, objectBalls[0], 1, 0),
+      ...objectBalls.slice(0, 4).map((ball, index) =>
+        Outcome.cushion(ball, 1, index + 1),
+      ),
+    ];
+    const events = (engine as any).applyEightBall(outcomes, true);
+    expect(engine.state.lastMessage).toBe("开球有效，交换击球权");
+    expect(events.some((event: any) => event.type === "turn")).toBe(true);
+  });
+
   it("scores a snooker red and then requires a colour", () => {
     const engine = new MatchEngine({ gameType: "snooker" });
     const red = engine.table.balls[7];
@@ -171,5 +265,26 @@ describe("MatchEngine", () => {
     engine.state.phase = "ballInHand";
     const occupied = engine.table.balls[1].pos;
     expect(() => engine.placeCueBall(occupied.x, occupied.y)).toThrow();
+  });
+
+  it("previews placement legality from a snapshot on both ends", () => {
+    const engine = new MatchEngine({ gameType: "eightball" });
+    const snapshot = engine.snapshot();
+    const occupied = snapshot.balls[1].pos;
+    expect(cueBallPlacementLegal(snapshot, occupied[0], occupied[1])).toBe(
+      false,
+    );
+    expect(cueBallPlacementLegal(snapshot, 10, 0)).toBe(false);
+    expect(cueBallPlacementLegal(snapshot, Number.NaN, 0)).toBe(false);
+    expect(cueBallPlacementLegal(snapshot, 0, 0)).toBe(true);
+
+    snapshot.balls[1].state = "InPocket";
+    expect(cueBallPlacementLegal(snapshot, occupied[0], occupied[1])).toBe(
+      true,
+    );
+
+    const snooker = new MatchEngine({ gameType: "snooker" }).snapshot();
+    expect(cueBallPlacementLegal(snooker, Rack.baulk + 0.05, 0)).toBe(false);
+    expect(cueBallPlacementLegal(snooker, Rack.baulk - 0.1, 0.1)).toBe(true);
   });
 });

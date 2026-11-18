@@ -1,8 +1,19 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname } from "node:path";
 import cloudbase from "@cloudbase/node-sdk";
 import type { GameType, MatchSnapshot } from "@friend-billiards/core";
-import type { PlayerIndex, ServerMessage } from "@friend-billiards/protocol";
+import type {
+  PlayerIndex,
+  RoomMode,
+  RoomStatus,
+  ServerMessage,
+} from "@friend-billiards/protocol";
 
 export interface StoredPlayer {
   userId: string;
@@ -24,7 +35,13 @@ export interface RoomRecord {
   matchId: string;
   gameType: GameType;
   predictionLevel: number;
-  status: "waiting" | "playing" | "gameOver";
+  mode: RoomMode;
+  cardCount: number;
+  maxPlayers: 2 | 3;
+  playerCount: number;
+  status: RoomStatus;
+  startAt: number | null;
+  frameIndex: number;
   players: StoredPlayer[];
   snapshot: MatchSnapshot;
   stateHash: string;
@@ -60,6 +77,7 @@ export class MemoryRoomRepository implements RoomRepository {
 
 export class FileRoomRepository implements RoomRepository {
   private writes: Promise<void> = Promise.resolve();
+  private writeIndex = 0;
 
   constructor(private readonly filePath: string) {}
 
@@ -83,19 +101,40 @@ export class FileRoomRepository implements RoomRepository {
     await this.enqueue(async () => {
       const records = await this.read();
       records[record.roomCode] = snapshot;
-      await mkdir(dirname(this.filePath), { recursive: true });
-      const temporary = `${this.filePath}.${process.pid}.tmp`;
-      await writeFile(temporary, JSON.stringify(records), { mode: 0o600 });
-      await rename(temporary, this.filePath);
+      await this.persist(records);
     });
+  }
+
+  private async persist(records: Record<string, RoomRecord>) {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    this.writeIndex += 1;
+    const temporary = `${this.filePath}.${process.pid}.${this.writeIndex}.tmp`;
+    await writeFile(temporary, JSON.stringify(records), { mode: 0o600 });
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await rename(temporary, this.filePath);
+        return;
+      } catch (error: any) {
+        const retryable =
+          error.code === "EPERM" ||
+          error.code === "EBUSY" ||
+          error.code === "EACCES";
+        if (!retryable || attempt >= 12) {
+          await unlink(temporary).catch(() => {});
+          throw error;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(500, 50 * (attempt + 1))),
+        );
+      }
+    }
   }
 
   async remove(roomCode: string) {
     await this.enqueue(async () => {
       const records = await this.read();
       delete records[roomCode];
-      await mkdir(dirname(this.filePath), { recursive: true });
-      await writeFile(this.filePath, JSON.stringify(records), { mode: 0o600 });
+      await this.persist(records);
     });
   }
 

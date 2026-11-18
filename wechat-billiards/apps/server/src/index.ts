@@ -89,6 +89,7 @@ export async function createApp(options: AppOptions = {}) {
               userId: user.userId,
               sessionToken: user.sessionToken,
               expiresAt: user.expiresAt,
+              serverTime: Date.now(),
             });
           } catch (error: any) {
             send(socket, {
@@ -121,7 +122,7 @@ export async function createApp(options: AppOptions = {}) {
           protocolVersion: PROTOCOL_VERSION,
           ...(requestId ? { requestId } : {}),
           type: "error",
-          code: "BAD_REQUEST",
+          code: error.code ?? "BAD_REQUEST",
           message: String(error.message ?? error).slice(0, 180),
         });
       }

@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import WebSocket from "ws";
 
 const require = createRequire(import.meta.url);
-const storePath = "apps/server/data/e2e-rooms.json";
+const storePath = `apps/server/data/e2e-rooms-${process.pid}.json`;
 process.env.ROOM_STORE_PATH = storePath;
 process.env.NODE_ENV = "test";
 await unlink(storePath).catch(() => {});
@@ -31,7 +31,11 @@ class Client {
   }
 
   send(message) {
-    this.socket.send(JSON.stringify({ ...message, protocolVersion: 1 }));
+    this.socket.send(JSON.stringify({ ...message, protocolVersion: 2 }));
+  }
+
+  sendRaw(message) {
+    this.socket.send(JSON.stringify(message));
   }
 
   wait(predicate, start = 0, timeout = 10000) {
@@ -95,6 +99,18 @@ try {
   await host.login("e2e-host");
   await guest.login("e2e-guest");
 
+  const legacy = new Client();
+  await legacy.connect(port);
+  const versionStart = legacy.messages.length;
+  legacy.sendRaw({ protocolVersion: 1, type: "ping" });
+  const versionError = await legacy.wait(
+    (m) => m.type === "error",
+    versionStart,
+  );
+  if (versionError.code !== "PROTOCOL_VERSION")
+    throw new Error("旧协议版本未被明确拒绝");
+  legacy.close();
+
   const invalidLevel = await host.request(
     { type: "createRoom", gameType: "eightball", predictionLevel: 9 },
     (m) => m.type === "error",
@@ -109,19 +125,52 @@ try {
   const { roomCode, inviteToken, matchId } = created.room;
   if (created.room.predictionLevel !== 4)
     throw new Error("创建房间未保存预测线档位");
+  if (
+    created.room.status !== "trial" ||
+    created.room.playerCount !== 1 ||
+    created.snapshot.practice !== true
+  )
+    throw new Error("建房后未进入试玩");
+
+  const trialStart = host.messages.length;
+  host.send({
+    type: "shoot",
+    matchId,
+    shotId: "trial-shot",
+    input: { angle: Math.PI, power: 0.05, spinX: 0, spinY: 0, elevation: 0 },
+  });
+  const trialShot = await host.wait(
+    (m) => m.type === "shot",
+    trialStart,
+  );
+  if (
+    trialShot.room.status !== "trial" ||
+    trialShot.snapshot.shotNumber !== 1
+  )
+    throw new Error("试玩击球未生效或错误进入正式局");
+
   const joined = await guest.request(
     { type: "joinRoom", roomCode, inviteToken },
-    (m) => m.type === "room" && m.room.players.length === 2,
+    (m) => m.type === "room" && m.room.status === "starting",
   );
   if (joined.room.predictionLevel !== 4)
     throw new Error("加入房间后预测线档位丢失");
-  await host.request(
-    { type: "ready", roomCode, ready: true },
-    (m) => m.type === "room",
+  if (
+    joined.room.status !== "starting" ||
+    joined.snapshot.shotNumber !== 0 ||
+    joined.snapshot.scores.some((score) => score !== 0)
+  )
+    throw new Error("好友加入后未重置为正式开局");
+  const startingOnHost = await host.wait(
+    (m) => m.type === "room" && m.room.status === "starting",
   );
-  const playing = await guest.request(
-    { type: "ready", roomCode, ready: true },
+  if (startingOnHost.room.startAt === null)
+    throw new Error("倒计时缺少 startAt");
+
+  const playing = await guest.wait(
     (m) => m.type === "room" && m.room.status === "playing",
+    guest.messages.length - 1,
+    10000,
   );
   if (playing.snapshot.currentPlayer !== 0) throw new Error("开局玩家错误");
 
@@ -247,18 +296,29 @@ try {
     concedingClient === reconnected ? reconnectedGuest : reconnected;
   otherClient.send({ type: "rematch", matchId });
   const rematch = await otherClient.wait(
-    (m) => m.type === "room" && m.room.status === "playing",
+    (m) => m.type === "room" && m.room.status === "starting",
     rematchBroadcastStart,
   );
   if (
     rematch.room.predictionLevel !== 4 ||
-    rematch.snapshot.shotNumber !== 0
+    rematch.snapshot.shotNumber !== 0 ||
+    rematch.room.startAt === null
   )
     throw new Error("再来一局未保留预测线档位或未重置对局");
+  const rematchPlaying = await otherClient.wait(
+    (m) => m.type === "room" && m.room.status === "playing",
+    otherClient.messages.length - 1,
+    10000,
+  );
   const rematchOnHost = await reconnected.wait(
     (m) => m.type === "room" && m.room.status === "playing",
+    reconnected.messages.length - 1,
+    10000,
   );
-  if (rematchOnHost.room.predictionLevel !== 4)
+  if (
+    rematchOnHost.room.predictionLevel !== 4 ||
+    rematchPlaying.room.predictionLevel !== 4
+  )
     throw new Error("再来一局双端预测线档位不一致");
 
   reconnected.close();
@@ -271,9 +331,11 @@ try {
         checks: [
           "health",
           "login",
-          "create",
-          "join",
-          "ready",
+          "protocol-version-reject",
+          "create-trial",
+          "trial-shot",
+          "join-starting",
+          "countdown-playing",
           "turn-authority",
           "dual-shot",
           "idempotency",
@@ -282,6 +344,7 @@ try {
           "repeat-ball-in-hand",
           "restart-restore",
           "concede",
+          "rematch-countdown",
           "rematch-prediction",
         ],
         stateHash: secondPlacement.stateHash,

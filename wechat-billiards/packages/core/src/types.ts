@@ -1,5 +1,5 @@
 export type GameType = "eightball" | "nineball" | "snooker";
-export type PlayerIndex = 0 | 1;
+export type PlayerIndex = number;
 export type MatchPhase = "aiming" | "ballInHand" | "shooting" | "gameOver";
 export type BallGroup = "open" | "solids" | "stripes";
 export type Vec3Data = [number, number, number];
@@ -27,18 +27,24 @@ export interface SnookerTarget {
   freeBall: boolean;
   nominatedBall: number | null;
   respottedBlack: boolean;
+  /** Colour on in the final sequence, 1=yellow … 6=black. */
+  nextColour: number;
 }
 
 export interface MatchSnapshot {
-  version: 1;
+  version: 2;
   gameType: GameType;
   phase: MatchPhase;
   canRepositionCue: boolean;
   practice: boolean;
+  playerCount: number;
   currentPlayer: PlayerIndex;
-  players: [string, string];
-  groups: [BallGroup, BallGroup];
-  scores: [number, number];
+  players: string[];
+  groups: BallGroup[];
+  scores: number[];
+  eliminated: boolean[];
+  /** Final order once the match ends; empty while playing. */
+  ranking: PlayerIndex[];
   currentBreak: number;
   shotNumber: number;
   target: SnookerTarget;
@@ -61,7 +67,7 @@ export type RuleEvent =
   | { type: "foul"; player: PlayerIndex; reason: string; penalty: number }
   | { type: "turn"; player: PlayerIndex }
   | { type: "ballInHand"; player: PlayerIndex }
-  | { type: "groups"; groups: [BallGroup, BallGroup] }
+  | { type: "groups"; groups: BallGroup[] }
   | { type: "score"; player: PlayerIndex; score: number; currentBreak: number }
   | { type: "respot"; ballIds: number[] }
   | { type: "freeBall"; player: PlayerIndex }
@@ -91,6 +97,7 @@ export interface ShotResult {
 
 export interface CreateMatchOptions {
   gameType: GameType;
-  playerNames?: [string, string];
+  playerNames?: string[];
+  playerCount?: number;
   practice?: boolean;
 }

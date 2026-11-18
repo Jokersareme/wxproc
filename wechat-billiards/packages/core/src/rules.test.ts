@@ -62,6 +62,7 @@ describe("rule boundaries", () => {
     const engine = new MatchEngine({ gameType: "snooker" });
     engine.state.target.targetIsRed = false;
     engine.state.target.previousPotRed = false;
+    engine.state.target.nextColour = 6;
     engine.state.scores = [10, 5];
     engine.table.balls.forEach((ball) => {
       if (ball.id !== 0 && ball.id !== 6) ball.state = State.InPocket;
@@ -70,6 +71,79 @@ describe("rule boundaries", () => {
     expect(engine.state.scores[0]).toBe(17);
     expect(engine.state.winner).toBe(0);
     expect(engine.state.phase).toBe("gameOver");
+  });
+
+  it("scores one and moves to a colour after a red-phase free ball", () => {
+    const engine = new MatchEngine({ gameType: "snooker" });
+    engine.state.target.freeBall = true;
+    engine.state.target.nominatedBall = 4;
+    const blue = engine.table.balls[4];
+    (engine as any).applySnooker(pot(engine, blue));
+    expect(engine.state.scores[0]).toBe(1);
+    expect(engine.state.target.targetIsRed).toBe(false);
+    expect(engine.state.target.previousPotRed).toBe(true);
+    expect(engine.state.target.freeBall).toBe(false);
+    expect(engine.state.target.nominatedBall).toBeNull();
+    expect(blue.onTable()).toBe(true);
+  });
+
+  it("scores the on-colour value and returns to reds after a colour-phase free ball", () => {
+    const engine = new MatchEngine({ gameType: "snooker" });
+    engine.state.target.targetIsRed = false;
+    engine.state.target.previousPotRed = true;
+    engine.state.target.nextColour = 4;
+    engine.state.target.freeBall = true;
+    engine.state.target.nominatedBall = 2;
+    const yellow = engine.table.balls[2];
+    (engine as any).applySnooker(pot(engine, yellow));
+    expect(engine.state.scores[0]).toBe(5);
+    expect(engine.state.target.previousPotRed).toBe(false);
+    expect(engine.state.target.targetIsRed).toBe(true);
+    expect(yellow.onTable()).toBe(true);
+  });
+
+  it("advances the colour sequence after a free ball with no reds left", () => {
+    const engine = new MatchEngine({ gameType: "snooker" });
+    engine.table.balls.forEach((ball) => {
+      if (ball.id >= 7) ball.state = State.InPocket;
+    });
+    engine.state.target.targetIsRed = false;
+    engine.state.target.previousPotRed = false;
+    engine.state.target.nextColour = 1;
+    engine.state.target.freeBall = true;
+    engine.state.target.nominatedBall = 4;
+    const blue = engine.table.balls[4];
+    (engine as any).applySnooker(pot(engine, blue));
+    expect(engine.state.scores[0]).toBe(2);
+    expect(engine.state.target.targetIsRed).toBe(false);
+    expect(engine.state.target.previousPotRed).toBe(false);
+    expect(engine.state.target.nextColour).toBe(2);
+    expect(blue.onTable()).toBe(true);
+  });
+
+  it("loses the frame on a foul during the respotted black", () => {
+    const engine = new MatchEngine({ gameType: "snooker" });
+    engine.state.target.targetIsRed = false;
+    engine.state.target.previousPotRed = false;
+    engine.state.target.nextColour = 6;
+    engine.state.target.respottedBlack = true;
+    const yellow = engine.table.balls[1];
+    (engine as any).applySnooker([
+      Outcome.collision(engine.table.cueball, yellow, 1, 0),
+    ]);
+    expect(engine.state.phase).toBe("gameOver");
+    expect(engine.state.winner).toBe(1);
+    expect(engine.state.endReason).toContain("重摆黑球");
+  });
+
+  it("rejects nominating the colour that is currently on", () => {
+    const engine = new MatchEngine({ gameType: "snooker" });
+    engine.state.target.targetIsRed = false;
+    engine.state.target.previousPotRed = false;
+    engine.state.target.freeBall = true;
+    engine.state.target.nextColour = 4;
+    expect(() => engine.nominateFreeBall(4)).toThrow("当前目标球");
+    expect(() => engine.nominateFreeBall(2)).not.toThrow();
   });
 
   it("allows a nominated colour only while a snooker free ball is active", () => {
@@ -99,9 +173,10 @@ describe("rule boundaries", () => {
     expect(restored.state.canRepositionCue).toBe(true);
 
     restored.state.shotNumber = 1;
+    restored.placeCueBall(0.6, 0);
     const shot = restored.shoot({
       angle: 0,
-      power: 0.5,
+      power: 1,
       spinX: 0,
       spinY: 0,
       elevation: 0,
@@ -110,10 +185,10 @@ describe("rule boundaries", () => {
     expect(() => restored.placeCueBall(-0.4, 0)).toThrow("当前没有自由球");
   });
 
-  it("rejects cue-ball placement in an ordinary turn", () => {
+  it("allows cue-ball repositioning before the opening shot", () => {
     const engine = new MatchEngine({ gameType: "eightball" });
-    expect(engine.state.canRepositionCue).toBe(false);
-    expect(() => engine.placeCueBall(-0.5, 0)).toThrow("当前没有自由球");
+    expect(engine.state.canRepositionCue).toBe(true);
+    expect(() => engine.placeCueBall(-0.5, 0)).not.toThrow();
   });
 
   it("restores ball in hand from a legacy snapshot", () => {

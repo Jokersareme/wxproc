@@ -1,7 +1,18 @@
-export { MatchEngine, PHYSICS_STEP, validateShotInput } from "./engine";
+export {
+  cueBallPlacementLegal,
+  MatchEngine,
+  PHYSICS_STEP,
+  stopSlowBall,
+  validateShotInput,
+} from "./engine";
 export { hashSnapshot } from "./hash";
 export { tableDimensions } from "./geometry";
-export { applyMatchTable, GAME_PHYSICS, tunedMaxPower } from "./tuning";
+export {
+  applyMatchTable,
+  GAME_PHYSICS,
+  STOP_SPEED,
+  tunedMaxPower,
+} from "./tuning";
 export type {
   BallGroup,
   BallSnapshot,

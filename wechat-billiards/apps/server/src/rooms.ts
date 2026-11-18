@@ -7,7 +7,9 @@ import {
 } from "@friend-billiards/core";
 import {
   PROTOCOL_VERSION,
+  ProtocolError,
   type ClientMessage,
+  type RoomMode,
   type RoomState,
   type ServerMessage,
 } from "@friend-billiards/protocol";
@@ -28,7 +30,11 @@ interface ActiveRoom {
   engine: MatchEngine;
   sockets: Map<string, SocketLike>;
   shots: Map<string, StoredShot>;
+  timer?: ReturnType<typeof setTimeout>;
 }
+
+const TRIAL_OPPONENT = "试玩";
+const START_COUNTDOWN_MS = 3000;
 
 function send(socket: SocketLike, message: ServerMessage) {
   socket.send(JSON.stringify(message));
@@ -36,6 +42,40 @@ function send(socket: SocketLike, message: ServerMessage) {
 
 function normalisePredictionLevel(value: number): number {
   return Number.isInteger(value) && value >= 0 && value <= 5 ? value : 0;
+}
+
+function normaliseMode(value: RoomMode | undefined): RoomMode {
+  return value === "cards" || value === "threeSnooker" ? value : "classic";
+}
+
+function normaliseStatus(value: string | undefined): RoomRecord["status"] {
+  if (value === "starting" || value === "playing" || value === "gameOver")
+    return value;
+  if (value === "waiting") return "trial";
+  return "trial";
+}
+
+function normaliseRecord(record: RoomRecord) {
+  record.predictionLevel = normalisePredictionLevel(record.predictionLevel ?? 0);
+  record.mode = normaliseMode(record.mode);
+  record.cardCount =
+    record.mode === "cards"
+      ? Math.max(0, Math.min(6, Math.floor(record.cardCount ?? 0)))
+      : 0;
+  record.maxPlayers = record.mode === "threeSnooker" ? 3 : 2;
+  record.playerCount = record.players.length;
+  record.status = normaliseStatus(record.status as unknown as string);
+  record.startAt =
+    record.status === "starting" ? (record.startAt ?? null) : null;
+  record.frameIndex = record.frameIndex ?? 0;
+  record.rematchUserIds = record.rematchUserIds ?? [];
+  record.shots = record.shots ?? [];
+  record.players.forEach((player, index) => {
+    player.playerIndex = Number.isInteger(player.playerIndex)
+      ? player.playerIndex
+      : index;
+    player.ready = player.ready ?? false;
+  });
 }
 
 export class RoomService {
@@ -50,7 +90,24 @@ export class RoomService {
     const records = await this.repository.list();
     for (const record of records) {
       try {
-        this.install(record);
+        normaliseRecord(record);
+        const room = this.install(record);
+        if (record.status === "starting") {
+          if (record.startAt === null || record.startAt <= Date.now()) {
+            await this.enterPlaying(room);
+          } else {
+            this.scheduleStart(room);
+          }
+        } else if (record.status === "trial") {
+          if (record.players.length >= record.maxPlayers) {
+            await this.beginMatch(room);
+          } else if (
+            !room.engine.state.practice &&
+            (record.mode !== "threeSnooker" || record.players.length < 2)
+          ) {
+            await this.revertToTrial(room);
+          }
+        }
       } catch (error) {
         console.error("无法恢复房间", {
           roomCode: record.roomCode,
@@ -67,11 +124,13 @@ export class RoomService {
           context,
           message.gameType,
           message.predictionLevel,
+          message.mode,
+          message.cardCount,
         );
       case "joinRoom":
         return this.joinRoom(context, message.roomCode, message.inviteToken);
       case "ready":
-        return this.ready(context, message.roomCode, message.ready);
+        return this.ready(context, message.roomCode);
       case "placeBall":
         return this.placeBall(context, message.matchId, message.x, message.y);
       case "nominateFreeBall":
@@ -111,6 +170,7 @@ export class RoomService {
         const player = room.record.players.find(
           (candidate) => candidate.userId === userId,
         );
+        if (player) player.ready = false;
         this.broadcast(room, {
           protocolVersion: PROTOCOL_VERSION,
           type: "opponent",
@@ -118,19 +178,20 @@ export class RoomService {
           connected: false,
         });
         this.broadcastRoom(room);
-        if (player) player.ready = false;
-        const saving = this.save(room);
-        this.pendingSaves.add(saving);
-        saving.then(
-          () => this.pendingSaves.delete(saving),
-          () => this.pendingSaves.delete(saving),
-        );
+        if (
+          room.record.status === "starting" ||
+          (room.record.status === "trial" && !room.engine.state.practice)
+        ) {
+          this.fire(this.revertToTrial(room), "回退试玩失败");
+        }
+        this.fire(this.save(room), "保存离线房间失败");
       }
     }
   }
 
   async flush() {
-    await Promise.all([...this.pendingSaves]);
+    while (this.pendingSaves.size > 0)
+      await Promise.all([...this.pendingSaves]);
   }
 
   roomCount() {
@@ -141,6 +202,8 @@ export class RoomService {
     context: ClientContext,
     gameType: GameType,
     predictionLevel: number,
+    modeValue?: RoomMode,
+    cardCountValue?: number,
   ) {
     await this.leaveCurrentRoom(context);
     let roomCode: string;
@@ -148,24 +211,37 @@ export class RoomService {
     while (this.rooms.has(roomCode));
     const inviteToken = randomBytes(24).toString("base64url");
     const matchId = randomBytes(12).toString("base64url");
-    const engine = new MatchEngine({
+    const mode = normaliseMode(modeValue);
+    const cardCount =
+      mode === "cards"
+        ? Math.max(0, Math.min(6, Math.floor(cardCountValue ?? 3)))
+        : 0;
+    const trial = new MatchEngine({
       gameType,
-      playerNames: [context.displayName, "等待好友"],
+      playerNames: [context.displayName, TRIAL_OPPONENT],
+      practice: true,
+      playerCount: 2,
     });
-    const snapshot = engine.snapshot();
+    const snapshot = trial.snapshot();
     const record: RoomRecord = {
       roomCode,
       inviteToken,
       matchId,
       gameType,
       predictionLevel: normalisePredictionLevel(predictionLevel),
-      status: "waiting",
+      mode,
+      cardCount,
+      maxPlayers: mode === "threeSnooker" ? 3 : 2,
+      playerCount: 1,
+      status: "trial",
+      startAt: null,
+      frameIndex: 0,
       players: [
         {
           userId: context.userId,
           displayName: context.displayName,
           playerIndex: 0,
-          ready: false,
+          ready: true,
         },
       ],
       snapshot,
@@ -179,7 +255,7 @@ export class RoomService {
     room.sockets.set(context.userId, context.socket);
     this.currentRooms.set(context.userId, roomCode);
     await this.save(room);
-    this.broadcastRoom(room, context.socket);
+    this.broadcastRoom(room);
   }
 
   private async joinRoom(
@@ -188,27 +264,45 @@ export class RoomService {
     inviteToken: string,
   ) {
     const room = this.rooms.get(roomCode);
-    if (!room || room.record.inviteToken !== inviteToken)
-      throw new Error("房间不存在或邀请令牌错误");
+    if (!room) throw new Error("房间不存在或已结束");
+    if (inviteToken && room.record.inviteToken !== inviteToken)
+      throw new Error("邀请已失效，请手动输入房间码");
     const existing = room.record.players.find(
       (player) => player.userId === context.userId,
     );
-    if (!existing && room.record.players.length >= 2)
-      throw new Error("房间已有两名玩家");
+    if (!existing) {
+      if (room.record.status === "gameOver")
+        throw new ProtocolError(
+          "ROOM_FINISHED",
+          "本局已结束，请让房主再来一局",
+        );
+      if (room.record.players.length >= room.record.maxPlayers)
+        throw new ProtocolError(
+          "ROOM_FULL",
+          `房间已满（${room.record.maxPlayers}/${room.record.maxPlayers}）`,
+        );
+      if (room.record.status !== "trial")
+        throw new Error("对局已经开始，无法加入");
+    }
     await this.leaveCurrentRoom(context, roomCode);
     if (existing) {
       existing.displayName = context.displayName;
+      if (room.record.status === "starting" && room.record.startAt !== null)
+        this.scheduleStart(room);
     } else {
+      const used = new Set(
+        room.record.players.map((player) => player.playerIndex),
+      );
+      let playerIndex = 0;
+      while (used.has(playerIndex)) playerIndex += 1;
       room.record.players.push({
         userId: context.userId,
         displayName: context.displayName,
-        playerIndex: 1,
-        ready: false,
+        playerIndex,
+        ready: true,
       });
       room.record.players.sort((a, b) => a.playerIndex - b.playerIndex);
-      room.engine.state.players[1] = context.displayName;
-      room.record.snapshot = room.engine.snapshot();
-      room.record.stateHash = hashSnapshot(room.record.snapshot);
+      room.record.playerCount = room.record.players.length;
     }
     room.sockets.set(context.userId, context.socket);
     this.currentRooms.set(context.userId, roomCode);
@@ -220,28 +314,128 @@ export class RoomService {
       connected: true,
     });
     this.broadcastRoom(room);
+
+    if (room.record.status === "trial") {
+      if (
+        room.record.players.length >= room.record.maxPlayers &&
+        room.record.players.every((player) => room.sockets.has(player.userId))
+      ) {
+        await this.beginMatch(room);
+      } else if (
+        room.record.mode === "threeSnooker" &&
+        room.record.players.length === 2
+      ) {
+        await this.beginWarmup(room);
+      }
+    }
   }
 
-  private async ready(
-    context: ClientContext,
-    roomCode: string,
-    ready: boolean,
-  ) {
+  private async beginWarmup(room: ActiveRoom) {
+    const players = [...room.record.players].sort(
+      (a, b) => a.playerIndex - b.playerIndex,
+    );
+    room.engine = new MatchEngine({
+      gameType: room.record.gameType,
+      playerNames: players.map((player) => player.displayName),
+      playerCount: players.length,
+      practice: false,
+    });
+    room.record.snapshot = room.engine.snapshot();
+    room.record.stateHash = hashSnapshot(room.record.snapshot);
+    room.record.status = "trial";
+    room.record.startAt = null;
+    room.record.shots = [];
+    room.record.rematchUserIds = [];
+    room.record.seq += 1;
+    room.shots.clear();
+    await this.save(room);
+    this.broadcastRoom(room);
+  }
+
+  private async ready(context: ClientContext, roomCode: string) {
     const room = this.rooms.get(roomCode);
     if (!room) throw new Error("房间不存在");
-    const player = room.record.players.find(
-      (candidate) => candidate.userId === context.userId,
-    );
-    if (!player) throw new Error("你不在该房间");
-    if (room.record.status !== "waiting") throw new Error("对局已经开始");
-    player.ready = ready;
     if (
-      room.record.players.length === 2 &&
-      room.record.players.every((candidate) => candidate.ready)
-    ) {
-      room.record.status = "playing";
-      room.record.seq += 1;
+      !room.record.players.some((player) => player.userId === context.userId)
+    )
+      throw new Error("你不在该房间");
+    room.sockets.set(context.userId, context.socket);
+    this.broadcastRoom(room);
+  }
+
+  private async beginMatch(room: ActiveRoom) {
+    this.clearTimer(room);
+    const players = [...room.record.players].sort(
+      (a, b) => a.playerIndex - b.playerIndex,
+    );
+    room.engine = new MatchEngine({
+      gameType: room.record.gameType,
+      playerNames: players.map((player) => player.displayName),
+      playerCount: room.record.maxPlayers,
+      practice: false,
+    });
+    room.record.snapshot = room.engine.snapshot();
+    room.record.stateHash = hashSnapshot(room.record.snapshot);
+    room.record.status = "starting";
+    room.record.startAt = Date.now() + START_COUNTDOWN_MS;
+    room.record.playerCount = players.length;
+    room.record.shots = [];
+    room.record.rematchUserIds = [];
+    room.record.seq += 1;
+    room.record.frameIndex += 1;
+    room.shots.clear();
+    await this.save(room);
+    this.scheduleStart(room);
+    this.broadcastRoom(room);
+  }
+
+  private scheduleStart(room: ActiveRoom) {
+    this.clearTimer(room);
+    const delay = Math.max(
+      0,
+      (room.record.startAt ?? Date.now()) - Date.now(),
+    );
+    room.timer = setTimeout(() => {
+      this.fire(this.finishStart(room), "开启正式局失败");
+    }, delay);
+  }
+
+  private async finishStart(room: ActiveRoom) {
+    room.timer = undefined;
+    if (room.record.status !== "starting") return;
+    if (room.record.playerCount < room.record.maxPlayers) {
+      await this.revertToTrial(room);
+      return;
     }
+    await this.enterPlaying(room);
+  }
+
+  private async enterPlaying(room: ActiveRoom) {
+    this.clearTimer(room);
+    room.record.status = "playing";
+    room.record.startAt = null;
+    room.record.seq += 1;
+    await this.save(room);
+    this.broadcastRoom(room);
+  }
+
+  private async revertToTrial(room: ActiveRoom) {
+    this.clearTimer(room);
+    const host =
+      room.record.players.find((player) => player.playerIndex === 0) ??
+      room.record.players[0];
+    room.engine = new MatchEngine({
+      gameType: room.record.gameType,
+      playerNames: [host?.displayName ?? "房主", TRIAL_OPPONENT],
+      practice: true,
+      playerCount: 2,
+    });
+    room.record.snapshot = room.engine.snapshot();
+    room.record.stateHash = hashSnapshot(room.record.snapshot);
+    room.record.status = "trial";
+    room.record.startAt = null;
+    room.record.rematchUserIds = [];
+    room.record.seq += 1;
     await this.save(room);
     this.broadcastRoom(room);
   }
@@ -253,7 +447,7 @@ export class RoomService {
     y: number,
   ) {
     const { room, playerIndex } = this.memberRoom(context, matchId);
-    this.assertPlaying(room, playerIndex);
+    this.assertCanAct(room, playerIndex);
     room.record.snapshot = room.engine.placeCueBall(x, y, playerIndex);
     room.record.stateHash = hashSnapshot(room.record.snapshot);
     room.record.seq += 1;
@@ -267,7 +461,7 @@ export class RoomService {
     ballId: number,
   ) {
     const { room, playerIndex } = this.memberRoom(context, matchId);
-    this.assertPlaying(room, playerIndex);
+    this.assertCanAct(room, playerIndex);
     room.record.snapshot = room.engine.nominateFreeBall(ballId, playerIndex);
     room.record.stateHash = hashSnapshot(room.record.snapshot);
     room.record.seq += 1;
@@ -289,13 +483,17 @@ export class RoomService {
         throw new Error("击球 ID 已被其他参数使用");
       return send(context.socket, duplicate.message);
     }
-    this.assertPlaying(room, playerIndex);
+    this.assertCanAct(room, playerIndex);
+    const trial = room.record.status === "trial";
+    const practiceTrial = trial && room.engine.state.practice;
     const preSnapshot = room.engine.snapshot();
     const result = room.engine.shoot(input, playerIndex);
     room.record.snapshot = result.snapshot;
     room.record.stateHash = result.stateHash;
-    room.record.status =
-      result.snapshot.phase === "gameOver" ? "gameOver" : "playing";
+    if (!trial) {
+      room.record.status =
+        result.snapshot.phase === "gameOver" ? "gameOver" : "playing";
+    }
     room.record.seq += 1;
     const roomState = this.roomState(room);
     const message: Extract<ServerMessage, { type: "shot" }> = {
@@ -314,6 +512,16 @@ export class RoomService {
       stateHash: result.stateHash,
       durationMs: result.durationMs,
     };
+    if (practiceTrial) {
+      await this.save(room);
+      send(context.socket, message);
+      return;
+    }
+    if (trial) {
+      await this.save(room);
+      this.broadcast(room, message);
+      return;
+    }
     const storedShot = { shotId, player: playerIndex, inputJson, message };
     room.record.shots.push(storedShot);
     room.shots.set(shotId, storedShot);
@@ -332,39 +540,40 @@ export class RoomService {
       connected: true,
     });
     this.broadcastRoom(room, context.socket);
-    const opponent = room.record.players.find(
-      (player) => player.playerIndex !== playerIndex,
-    );
-    if (opponent) {
-      send(context.socket, {
-        protocolVersion: PROTOCOL_VERSION,
-        type: "opponent",
-        matchId,
-        connected: room.sockets.has(opponent.userId),
-      });
+    room.record.players
+      .filter((player) => player.playerIndex !== playerIndex)
+      .forEach((opponent) =>
+        send(context.socket, {
+          protocolVersion: PROTOCOL_VERSION,
+          type: "opponent",
+          matchId,
+          connected: room.sockets.has(opponent.userId),
+        }),
+      );
+    if (
+      room.record.status === "trial" &&
+      room.record.players.length >= room.record.maxPlayers &&
+      room.record.players.every((player) => room.sockets.has(player.userId))
+    ) {
+      await this.beginMatch(room);
     }
   }
 
   private async rematch(context: ClientContext, matchId: string) {
     const { room } = this.memberRoom(context, matchId);
+    if (room.record.status === "trial") {
+      await this.revertToTrial(room);
+      return;
+    }
     if (room.record.status !== "gameOver") throw new Error("本局尚未结束");
     if (!room.record.rematchUserIds.includes(context.userId))
       room.record.rematchUserIds.push(context.userId);
-    if (room.record.rematchUserIds.length === 2) {
-      room.engine = new MatchEngine({
-        gameType: room.record.gameType,
-        playerNames: [
-          room.record.players[0].displayName,
-          room.record.players[1].displayName,
-        ],
-      });
-      room.record.snapshot = room.engine.snapshot();
-      room.record.stateHash = room.engine.stateHash();
-      room.record.status = "playing";
-      room.record.rematchUserIds = [];
-      room.record.shots = [];
-      room.shots.clear();
-      room.record.seq += 1;
+    const online = room.record.players.filter((player) =>
+      room.sockets.has(player.userId),
+    );
+    if (online.every((player) => room.record.rematchUserIds.includes(player.userId))) {
+      await this.beginMatch(room);
+      return;
     }
     await this.save(room);
     this.broadcastRoom(room);
@@ -372,7 +581,8 @@ export class RoomService {
 
   private async concede(context: ClientContext, matchId: string) {
     const { room, playerIndex } = this.memberRoom(context, matchId);
-    this.assertPlaying(room, playerIndex);
+    if (room.record.status !== "playing")
+      throw new Error("房间尚未开始或已经结束");
     room.record.snapshot = room.engine.concede(playerIndex);
     room.record.stateHash = hashSnapshot(room.record.snapshot);
     room.record.status = "gameOver";
@@ -382,12 +592,29 @@ export class RoomService {
   }
 
   private async leave(context: ClientContext, matchId: string) {
-    const { room } = this.memberRoom(context, matchId);
+    const { room, playerIndex } = this.memberRoom(context, matchId);
+    const countdownOrTrial =
+      room.record.status === "trial" || room.record.status === "starting";
+    if (countdownOrTrial && playerIndex !== 0) {
+      room.record.players = room.record.players.filter(
+        (player) => player.userId !== context.userId,
+      );
+      room.record.playerCount = room.record.players.length;
+      room.sockets.delete(context.userId);
+      this.currentRooms.delete(context.userId);
+      room.record.seq += 1;
+      await this.revertToTrial(room);
+      return;
+    }
+    this.clearTimer(room);
     this.broadcast(room, {
       protocolVersion: PROTOCOL_VERSION,
       type: "roomClosed",
       matchId,
-      reason: "有玩家离开，房间已关闭",
+      reason:
+        playerIndex === 0
+          ? "房主离开，房间已关闭"
+          : "好友离开，房间已关闭",
     });
     this.removeRoom(room);
     await this.repository.remove(room.record.roomCode);
@@ -407,10 +634,17 @@ export class RoomService {
     return { room, playerIndex: player.playerIndex };
   }
 
-  private assertPlaying(room: ActiveRoom, playerIndex: PlayerIndex) {
-    if (room.record.status !== "playing")
-      throw new Error("房间尚未开始或已经结束");
-    if (room.record.players.length !== 2) throw new Error("等待好友加入");
+  private assertCanAct(room: ActiveRoom, playerIndex: PlayerIndex) {
+    if (room.record.status === "starting")
+      throw new ProtocolError("MATCH_STARTING", "对局即将开始");
+    if (room.record.status === "gameOver")
+      throw new Error("本局已结束");
+    if (
+      room.record.status === "trial" &&
+      room.engine.state.practice &&
+      playerIndex !== 0
+    )
+      throw new ProtocolError("MATCH_NOT_TRIAL", "等待房主试玩结束");
     if (room.engine.state.currentPlayer !== playerIndex)
       throw new Error("还未轮到你");
   }
@@ -421,8 +655,13 @@ export class RoomService {
       inviteToken: room.record.inviteToken,
       matchId: room.record.matchId,
       gameType: room.record.gameType,
+      mode: room.record.mode,
+      cardCount: room.record.cardCount,
       predictionLevel: room.record.predictionLevel,
       status: room.record.status,
+      playerCount: room.record.playerCount,
+      maxPlayers: room.record.maxPlayers,
+      startAt: room.record.startAt,
       players: room.record.players.map((player) => ({
         ...player,
         connected: room.sockets.has(player.userId),
@@ -449,8 +688,10 @@ export class RoomService {
   }
 
   private install(record: RoomRecord): ActiveRoom {
-    record.predictionLevel = normalisePredictionLevel(record.predictionLevel);
+    normaliseRecord(record);
     const engine = MatchEngine.restore(record.snapshot);
+    record.snapshot = engine.snapshot();
+    record.stateHash = hashSnapshot(record.snapshot);
     const room: ActiveRoom = {
       record,
       engine,
@@ -462,9 +703,29 @@ export class RoomService {
     return room;
   }
 
+  private clearTimer(room: ActiveRoom) {
+    if (room.timer) clearTimeout(room.timer);
+    room.timer = undefined;
+  }
+
+  private fire(promise: Promise<unknown>, label: string) {
+    promise.catch((error) => console.error(label, String(error)));
+  }
+
   private async save(room: ActiveRoom) {
+    const saving = this.persist(room);
+    this.pendingSaves.add(saving);
+    try {
+      await saving;
+    } finally {
+      this.pendingSaves.delete(saving);
+    }
+  }
+
+  private async persist(room: ActiveRoom) {
     room.record.snapshot = room.engine.snapshot();
     room.record.stateHash = hashSnapshot(room.record.snapshot);
+    room.record.playerCount = room.record.players.length;
     room.record.updatedAt = Date.now();
     await this.repository.save(room.record);
   }
@@ -477,6 +738,7 @@ export class RoomService {
     if (!current || current === exceptRoomCode) return;
     const room = this.rooms.get(current);
     if (room) {
+      this.clearTimer(room);
       this.broadcast(room, {
         protocolVersion: PROTOCOL_VERSION,
         type: "roomClosed",
@@ -489,6 +751,7 @@ export class RoomService {
   }
 
   private removeRoom(room: ActiveRoom) {
+    this.clearTimer(room);
     room.record.players.forEach((player) =>
       this.currentRooms.delete(player.userId),
     );

@@ -16,8 +16,22 @@ export type {
   ShotInput,
 } from "@friend-billiards/core";
 
-export const PROTOCOL_VERSION = 1;
+
+export const PROTOCOL_VERSION = 2;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
+
+export type RoomMode = "classic" | "cards" | "threeSnooker";
+export type RoomStatus = "trial" | "starting" | "playing" | "gameOver";
+
+export class ProtocolError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProtocolError";
+  }
+}
 
 interface BaseMessage {
   protocolVersion: number;
@@ -31,6 +45,8 @@ export type ClientMessage = BaseMessage &
         type: "createRoom";
         gameType: GameType;
         predictionLevel: number;
+        mode?: RoomMode;
+        cardCount?: number;
       }
     | { type: "joinRoom"; roomCode: string; inviteToken: string }
     | { type: "ready"; roomCode: string; ready: boolean }
@@ -57,8 +73,13 @@ export interface RoomState {
   inviteToken: string;
   matchId: string;
   gameType: GameType;
+  mode: RoomMode;
+  cardCount: number;
   predictionLevel: number;
-  status: "waiting" | "playing" | "gameOver";
+  status: RoomStatus;
+  playerCount: number;
+  maxPlayers: 2 | 3;
+  startAt: number | null;
   players: RoomPlayer[];
   rematchUserIds: string[];
   seq: number;
@@ -71,6 +92,7 @@ export type ServerMessage = BaseMessage &
         userId: string;
         sessionToken: string;
         expiresAt: number;
+        serverTime: number;
       }
     | {
         type: "room";
@@ -121,7 +143,7 @@ function validShot(value: unknown): value is ShotInput {
 export function parseClientMessage(value: unknown): ClientMessage {
   if (!isObject(value)) throw new Error("消息必须是对象");
   if (value.protocolVersion !== PROTOCOL_VERSION)
-    throw new Error("客户端协议版本不兼容");
+    throw new ProtocolError("PROTOCOL_VERSION", "请更新到最新版本");
   if (value.requestId !== undefined && !string(value.requestId, 64))
     throw new Error("请求 ID 无效");
   const base = {
@@ -146,6 +168,11 @@ export function parseClientMessage(value: unknown): ClientMessage {
         !["eightball", "nineball", "snooker"].includes(value.gameType as string)
       )
         throw new Error("玩法无效");
+      const mode = (value.mode ?? "classic") as RoomMode;
+      if (!["classic", "cards", "threeSnooker"].includes(mode))
+        throw new Error("房间模式无效");
+      if (mode === "threeSnooker" && value.gameType !== "snooker")
+        throw new Error("三人模式只支持斯诺克");
       const predictionLevel =
         value.predictionLevel === undefined ? 0 : value.predictionLevel;
       if (
@@ -154,17 +181,32 @@ export function parseClientMessage(value: unknown): ClientMessage {
         (predictionLevel as number) > 5
       )
         throw new Error("预测线档位无效");
+      const requestedCards =
+        value.cardCount === undefined
+          ? mode === "cards"
+            ? 3
+            : 0
+          : value.cardCount;
+      if (
+        !Number.isInteger(requestedCards) ||
+        (requestedCards as number) < 0 ||
+        (requestedCards as number) > 6
+      )
+        throw new Error("卡牌数量无效");
       return {
         ...base,
         type: "createRoom",
         gameType: value.gameType as GameType,
         predictionLevel: predictionLevel as number,
+        mode,
+        cardCount: mode === "cards" ? (requestedCards as number) : 0,
       };
     }
     case "joinRoom":
       if (
         !/^\d{6}$/.test(value.roomCode as string) ||
-        !string(value.inviteToken, 128)
+        typeof value.inviteToken !== "string" ||
+        value.inviteToken.length > 128
       )
         throw new Error("房间邀请无效");
       return {

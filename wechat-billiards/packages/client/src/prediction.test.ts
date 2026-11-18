@@ -1,4 +1,6 @@
 import {
+  clipPathToBounds,
+  clipSegmentToBounds,
   maxPredictionLength,
   predictFirstBall,
   predictionLengthForLevel,
@@ -185,6 +187,52 @@ describe("prediction geometry", () => {
         (maximum * level) / 5,
         10,
       );
+  });
+
+  it("clips a segment at the first cushion it reaches", () => {
+    const bounds = { halfWidth: 1, halfHeight: 0.6 };
+    expect(clipSegmentToBounds({ x: 0, y: 0 }, { x: 2, y: 0 }, bounds)).toEqual(
+      { x: 1, y: 0 },
+    );
+    expect(
+      clipSegmentToBounds({ x: 0, y: 0 }, { x: -2, y: 1.2 }, bounds).x,
+    ).toBeCloseTo(-1, 10);
+  });
+
+  it("stops a polyline at the first boundary crossing", () => {
+    const bounds = { halfWidth: 1, halfHeight: 0.6 };
+    const path = clipPathToBounds(
+      [
+        { x: 0, y: 0 },
+        { x: 0.4, y: 0 },
+        { x: 0.8, y: 0 },
+        { x: 1.4, y: 0 },
+      ],
+      bounds,
+    );
+    expect(path).toHaveLength(4);
+    expect(path.at(-1)!.x).toBeCloseTo(1, 10);
+    expect(path.at(-1)!.y).toBeCloseTo(0, 10);
+  });
+
+  it("clips the normal and tangent prediction to the table", () => {
+    const bounds = { halfWidth: 1, halfHeight: 0.6 };
+    const prediction = predictFirstBall(
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      [ball(1, 0.6, 0.02)],
+      radius,
+      1,
+    )!;
+    const segments = predictionSegments(prediction, 1, undefined, bounds);
+    expect(segments.normal[1].x).toBeLessThanOrEqual(bounds.halfWidth);
+    expect(Math.abs(segments.normal[1].y)).toBeLessThanOrEqual(
+      bounds.halfHeight,
+    );
+    for (const point of segments.tangent ?? []) {
+      expect(Math.abs(point.x)).toBeLessThanOrEqual(bounds.halfWidth + 1e-9);
+      expect(Math.abs(point.y)).toBeLessThanOrEqual(bounds.halfHeight + 1e-9);
+    }
   });
 
   it("keeps low-power lines visible and increases their length with power", () => {

@@ -14,11 +14,18 @@ import {
   R,
 } from "../../../third_party/billiards/src/model/physics/constants";
 import { hashSnapshot } from "./hash";
-import { applyMatchTable, tunedMaxPower } from "./tuning";
+import {
+  tightenEightBallRack,
+  tightenNineBallRack,
+  tightenSnookerRack,
+} from "./rack";
+import { applyMatchTable, STOP_SPEED, tunedMaxPower } from "./tuning";
 import type {
   BallGroup,
   BallSnapshot,
   CreateMatchOptions,
+  GameType,
+  MatchPhase,
   MatchSnapshot,
   PhysicsEvent,
   PlayerIndex,
@@ -32,6 +39,44 @@ import type {
 export const PHYSICS_STEP = 0.001953125;
 const MAX_SHOT_SECONDS = 90;
 const FRAME_INTERVAL = 8;
+
+/**
+ * Shared settle rule. Called after every physics step on both the practice
+ * client and the authoritative server, so a shot ends at the same frame.
+ */
+export function stopSlowBall(ball: Ball): boolean {
+  if (!ball.onTable() || ball.vel.length() >= STOP_SPEED) return false;
+  ball.setStationary();
+  return true;
+}
+
+/**
+ * Pure legality check used by the drag preview in both practice and online
+ * matches. Keeping it snapshot-based means the client can turn the cue ball
+ * red (and refuse the release) without waiting for an authoritative reply.
+ */
+export function cueBallPlacementLegal(
+  snapshot: Pick<MatchSnapshot, "gameType" | "balls">,
+  x: number,
+  y: number,
+): boolean {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  if (
+    Math.abs(x) > TableGeometry.tableX - R ||
+    Math.abs(y) > TableGeometry.tableY - R
+  )
+    return false;
+  if (snapshot.gameType === "snooker") {
+    if (x > Rack.baulk || Math.hypot(x - Rack.baulk, y) > Rack.sixth)
+      return false;
+  }
+  return !snapshot.balls.some(
+    (ball) =>
+      ball.id !== 0 &&
+      ball.state !== "InPocket" &&
+      Math.hypot(ball.pos[0] - x, ball.pos[1] - y) < 2 * R,
+  );
+}
 
 (globalThis as { __BILLIARDS_HEADLESS__?: boolean }).__BILLIARDS_HEADLESS__ =
   true;
@@ -61,8 +106,78 @@ export function validateShotInput(input: ShotInput): string | null {
   return null;
 }
 
-function otherPlayer(player: PlayerIndex): PlayerIndex {
-  return player === 0 ? 1 : 0;
+function normalisePlayerCount(value: number | undefined): number {
+  if (!Number.isInteger(value)) return 2;
+  return Math.max(2, Math.min(3, value as number));
+}
+
+function lowestColourOnTable(balls: BallSnapshot[]): number {
+  const ids = balls
+    .filter(
+      (ball) =>
+        ball.id >= 1 &&
+        ball.id <= 6 &&
+        ball.state !== "InPocket" &&
+        ball.state !== "Falling",
+    )
+    .map((ball) => ball.id);
+  return ids.length ? Math.min(...ids) : 1;
+}
+
+function migrateSnapshot(raw: MatchSnapshot): MatchSnapshot {
+  const legacy = raw as unknown as {
+    version: number;
+    gameType: GameType;
+    phase: MatchPhase;
+    canRepositionCue: boolean;
+    practice: boolean;
+    playerCount?: number;
+    currentPlayer: PlayerIndex;
+    players?: string[];
+    groups?: BallGroup[];
+    scores?: number[];
+    eliminated?: boolean[];
+    ranking?: PlayerIndex[];
+    currentBreak: number;
+    shotNumber: number;
+    target?: Partial<MatchSnapshot["target"]>;
+    balls?: BallSnapshot[];
+    winner: PlayerIndex | null;
+    endReason: string | null;
+    lastMessage: string | null;
+  };
+  const names = Array.isArray(legacy.players)
+    ? legacy.players
+    : ["玩家 1", "玩家 2"];
+  const playerCount =
+    legacy.version === 1
+      ? names.length
+      : normalisePlayerCount(legacy.playerCount ?? names.length);
+  const players = Array.from(
+    { length: playerCount },
+    (_, index) => names[index] ?? `玩家 ${index + 1}`,
+  );
+  const snapshot: MatchSnapshot = {
+    ...legacy,
+    version: 2,
+    playerCount,
+    players,
+    groups: players.map((_, index) => legacy.groups?.[index] ?? "open"),
+    scores: players.map((_, index) => legacy.scores?.[index] ?? 0),
+    eliminated: players.map((_, index) => legacy.eliminated?.[index] ?? false),
+    ranking: [...(legacy.ranking ?? [])],
+    balls: legacy.balls ?? [],
+    target: {
+      targetIsRed: legacy.target?.targetIsRed ?? true,
+      previousPotRed: legacy.target?.previousPotRed ?? false,
+      freeBall: legacy.target?.freeBall ?? false,
+      nominatedBall: legacy.target?.nominatedBall ?? null,
+      respottedBlack: legacy.target?.respottedBlack ?? false,
+      nextColour:
+        legacy.target?.nextColour ?? lowestColourOnTable(legacy.balls ?? []),
+    },
+  };
+  return snapshot;
 }
 
 function vectorData(vector: Vector3): Vec3Data {
@@ -85,7 +200,7 @@ export class MatchEngine {
 
   constructor(options: CreateMatchOptions | MatchSnapshot) {
     if ("gameType" in options && "version" in options) {
-      this.state = cloneSnapshot(options as MatchSnapshot);
+      this.state = migrateSnapshot(cloneSnapshot(options as MatchSnapshot));
       this.state.canRepositionCue =
         options.canRepositionCue ?? options.phase === "ballInHand";
       this.configure();
@@ -115,16 +230,29 @@ export class MatchEngine {
           ? Rack.diamond()
           : Rack.snooker();
     this.table = new Table(balls);
+    if (gameType === "eightball") tightenEightBallRack(balls);
+    if (gameType === "nineball") tightenNineBallRack(balls);
+    if (gameType === "snooker") tightenSnookerRack(balls);
+    const playerCount = normalisePlayerCount(
+      options.playerCount ?? options.playerNames?.length ?? 2,
+    );
+    const players = Array.from(
+      { length: playerCount },
+      (_, index) => options.playerNames?.[index] ?? `玩家 ${index + 1}`,
+    );
     this.state = {
-      version: 1,
+      version: 2,
       gameType,
       phase: "aiming",
       canRepositionCue: true,
       practice: options.practice ?? false,
+      playerCount,
       currentPlayer: 0,
-      players: options.playerNames ?? ["玩家 1", "玩家 2"],
-      groups: ["open", "open"],
-      scores: [0, 0],
+      players,
+      groups: players.map(() => "open"),
+      scores: players.map(() => 0),
+      eliminated: players.map(() => false),
+      ranking: [],
       currentBreak: 0,
       shotNumber: 0,
       target: {
@@ -133,6 +261,7 @@ export class MatchEngine {
         freeBall: false,
         nominatedBall: null,
         respottedBlack: false,
+        nextColour: 1,
       },
       balls: [],
       winner: null,
@@ -194,6 +323,7 @@ export class MatchEngine {
         throw new Error("击球模拟超过时限，已中止");
       }
       this.table.advance(PHYSICS_STEP);
+      this.settleSlowBalls();
       if (steps % FRAME_INTERVAL === 0) this.captureFrame(frames);
     }
     this.captureFrame(frames);
@@ -226,6 +356,13 @@ export class MatchEngine {
       durationMs: this.table.time,
       ...(frames ? { frames } : {}),
     };
+  }
+
+  cueBallPositionLegal(x: number, y: number): boolean {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    return this.isCueBallPositionLegal(
+      new Vector3(Math.fround(x), Math.fround(y), 0),
+    );
   }
 
   placeCueBall(x: number, y: number, player = this.state.currentPlayer) {
@@ -262,6 +399,12 @@ export class MatchEngine {
     }
     const ball = this.table.balls[ballId];
     if (!ball?.onTable()) throw new Error("提名的彩球不在台面");
+    if (
+      !this.state.target.targetIsRed &&
+      !this.state.target.previousPotRed &&
+      ballId === this.state.target.nextColour
+    )
+      throw new Error("不能提名当前目标球");
     this.state.target.nominatedBall = ballId;
     this.state.lastMessage = `已提名${this.colourName(ballId)}为自由球`;
     return this.snapshot();
@@ -269,10 +412,21 @@ export class MatchEngine {
 
   concede(player: PlayerIndex): MatchSnapshot {
     if (this.state.phase === "gameOver") return this.snapshot();
-    this.state.winner = otherPlayer(player);
-    this.state.endReason = "对手认输";
-    this.state.lastMessage = this.state.endReason;
-    this.state.phase = "gameOver";
+    if (player < 0 || player >= this.state.playerCount)
+      throw new Error("玩家编号无效");
+    this.state.eliminated[player] = true;
+    const remaining = Array.from(
+      { length: this.state.playerCount },
+      (_, index) => index,
+    ).filter((index) => !this.state.eliminated[index]);
+    if (remaining.length <= 1) {
+      this.finish(remaining[0] ?? this.nextActivePlayer(player), "对手认输", []);
+    } else {
+      this.state.currentPlayer = this.nextActivePlayer(player);
+      this.state.currentBreak = 0;
+      this.state.phase = "aiming";
+      this.state.lastMessage = `${this.state.players[player] ?? `玩家 ${player + 1}`} 认输，继续对局`;
+    }
     return this.snapshot();
   }
 
@@ -309,10 +463,8 @@ export class MatchEngine {
         .filter((b) => b.id >= 1 && b.id <= 6 && b.onTable())
         .map((b) => b.id);
     }
-    const next = this.table.balls.find(
-      (b) => b.id >= 1 && b.id <= 6 && b.onTable(),
-    );
-    return next ? [next.id] : [];
+    const next = this.state.target.nextColour;
+    return this.table.balls[next]?.onTable() ? [next] : [];
   }
 
   private configure(gameType = this.state?.gameType) {
@@ -328,6 +480,10 @@ export class MatchEngine {
       rvel: vectorData(ball.rvel),
       state: ball.state,
     }));
+  }
+
+  private settleSlowBalls() {
+    for (const ball of this.table.balls) stopSlowBall(ball);
   }
 
   private captureFrame(frames?: ShotFrame[]) {
@@ -357,7 +513,7 @@ export class MatchEngine {
   private applyEightBall(outcomes: Outcome[], isBreak: boolean): RuleEvent[] {
     const events: RuleEvent[] = [];
     const player = this.state.currentPlayer;
-    const opponent = otherPlayer(player);
+    const opponent = this.nextActivePlayer(player);
     const pots = Outcome.pots(outcomes);
     const objectPots = pots.filter((ball) => ball.id !== 0 && ball.label !== 8);
     const eightPotted = pots.some((ball) => ball.label === 8);
@@ -448,6 +604,9 @@ export class MatchEngine {
       this.state.phase = "aiming";
       this.state.lastMessage = "合法落袋，继续击球";
     } else {
+      this.state.lastMessage = isBreak
+        ? "开球有效，交换击球权"
+        : "交换击球权";
       this.switchPlayer(events);
       this.state.phase = "aiming";
     }
@@ -506,6 +665,9 @@ export class MatchEngine {
         currentBreak: this.state.currentBreak,
       });
     } else {
+      this.state.lastMessage = isBreak
+        ? "开球有效，交换击球权"
+        : "交换击球权";
       this.switchPlayer(events);
       this.state.phase = "aiming";
     }
@@ -515,16 +677,13 @@ export class MatchEngine {
   private applySnooker(outcomes: Outcome[]): RuleEvent[] {
     const events: RuleEvent[] = [];
     const player = this.state.currentPlayer;
+    const opponent = this.nextActivePlayer(player);
     const targetBefore = { ...this.state.target };
     const pots = Outcome.pots(outcomes);
     const objectPots = pots.filter((ball) => ball.id !== 0);
     const first = this.firstCueCollision(outcomes);
     const firstId = first?.id ?? -1;
-    const coloursBefore = this.table.balls.filter(
-      (ball) =>
-        ball.id >= 1 && ball.id <= 6 && (ball.onTable() || pots.includes(ball)),
-    );
-    const nextColour = coloursBefore.sort((a, b) => a.id - b.id)[0]?.id ?? 6;
+    const nextColour = targetBefore.nextColour;
     const nominated = targetBefore.freeBall ? targetBefore.nominatedBall : null;
     let legalFirst: boolean;
     if (nominated) legalFirst = firstId === nominated;
@@ -550,11 +709,7 @@ export class MatchEngine {
         legalPot = false;
       } else if (objectPots.length === 1 && objectPots[0].id === nominated) {
         legalPot = true;
-        points = targetBefore.targetIsRed
-          ? 1
-          : targetBefore.previousPotRed
-            ? nominated
-            : nextColour + 1;
+        points = targetBefore.targetIsRed ? 1 : nextColour + 1;
         respotIds = [nominated];
       } else {
         foul = "自由球击球出现额外落袋";
@@ -589,6 +744,11 @@ export class MatchEngine {
     }
 
     if (foul) {
+      if (targetBefore.respottedBlack) {
+        this.state.lastMessage = `重摆黑球阶段犯规：${foul}`;
+        events.push({ type: "foul", player, reason: foul, penalty: 7 });
+        return this.finish(opponent, "重摆黑球阶段犯规，本局结束", events);
+      }
       const penalty = Math.max(
         4,
         targetBefore.targetIsRed
@@ -606,23 +766,27 @@ export class MatchEngine {
         .map((ball) => ball.id);
       this.respotBalls(respotIds);
       if (respotIds.length) events.push({ type: "respot", ballIds: respotIds });
-      this.state.scores[otherPlayer(player)] += penalty;
+      this.state.scores[opponent] += penalty;
       this.state.currentBreak = 0;
-      this.state.lastMessage = `犯规：${foul}，罚 ${penalty} 分`;
+      this.state.lastMessage = this.state.practice
+        ? `犯规：${foul}`
+        : `犯规：${foul}，罚 ${penalty} 分`;
       events.push({ type: "foul", player, reason: foul, penalty });
       this.switchPlayer(events);
       this.state.target.freeBall = this.isSnookered();
       this.state.target.nominatedBall = null;
       if (this.state.target.freeBall) {
         events.push({ type: "freeBall", player: this.state.currentPlayer });
-        this.state.lastMessage += "；对手被斯诺克，可提名自由球";
+        this.state.lastMessage += this.state.practice
+          ? "；可提名自由球"
+          : "；对手被斯诺克，可提名自由球";
       }
       if (whitePotted) this.giveBallInHand(events);
       else this.state.phase = "aiming";
       events.push({
         type: "score",
-        player: otherPlayer(player),
-        score: this.state.scores[otherPlayer(player)],
+        player: opponent,
+        score: this.state.scores[opponent],
         currentBreak: 0,
       });
       return events;
@@ -641,32 +805,65 @@ export class MatchEngine {
         score: this.state.scores[player],
         currentBreak: this.state.currentBreak,
       });
+      const finalBlack =
+        !targetBefore.targetIsRed &&
+        !targetBefore.previousPotRed &&
+        nextColour === 6;
       if (nominated) {
-        this.state.target = {
-          ...targetBefore,
-          freeBall: false,
-          nominatedBall: null,
-        };
+        this.state.target.freeBall = false;
+        this.state.target.nominatedBall = null;
+        if (targetBefore.targetIsRed) {
+          this.state.target.targetIsRed = false;
+          this.state.target.previousPotRed = true;
+        } else if (targetBefore.previousPotRed) {
+          this.state.target.previousPotRed = false;
+          this.state.target.targetIsRed = this.redsRemaining() > 0;
+          if (!this.state.target.targetIsRed)
+            this.state.target.nextColour = 1;
+        } else {
+          this.state.target.targetIsRed = false;
+          this.state.target.previousPotRed = false;
+          this.state.target.nextColour = Math.min(
+            7,
+            targetBefore.nextColour + 1,
+          );
+        }
       } else if (targetBefore.targetIsRed) {
         this.state.target.targetIsRed = false;
         this.state.target.previousPotRed = true;
       } else if (targetBefore.previousPotRed) {
         this.state.target.previousPotRed = false;
         this.state.target.targetIsRed = this.redsRemaining() > 0;
+        if (!this.state.target.targetIsRed)
+          this.state.target.nextColour = 1;
       } else {
         this.state.target.targetIsRed = false;
         this.state.target.previousPotRed = false;
+        this.state.target.nextColour = Math.min(
+          7,
+          targetBefore.nextColour + 1,
+        );
       }
 
-      const finalBlack =
-        !targetBefore.targetIsRed &&
-        !targetBefore.previousPotRed &&
-        !nominated &&
-        nextColour === 6;
       if (finalBlack) {
-        if (this.state.scores[0] === this.state.scores[1]) {
+        if (targetBefore.respottedBlack) {
+          this.state.target.respottedBlack = false;
+          return this.finish(player, "重摆黑球落袋，本局结束", events);
+        }
+        const highest = this.state.scores.reduce(
+          (best, score, index) =>
+            score > this.state.scores[best] ? index : best,
+          0,
+        );
+        const tied = this.state.scores.every(
+          (score) => score === this.state.scores[0],
+        );
+        if (tied && this.state.playerCount === 2) {
           this.respotBalls([6]);
           this.state.target.respottedBlack = true;
+          this.state.target.targetIsRed = false;
+          this.state.target.previousPotRed = false;
+          this.state.target.nextColour = 6;
           this.state.lastMessage = "比分相同，重摆黑球决胜";
           events.push({ type: "respot", ballIds: [6] });
           events.push({ type: "info", message: this.state.lastMessage });
@@ -674,9 +871,7 @@ export class MatchEngine {
           this.giveBallInHand(events);
           return events;
         }
-        const winner: PlayerIndex =
-          this.state.scores[0] > this.state.scores[1] ? 0 : 1;
-        return this.finish(winner, "黑球落袋，本局结束", events);
+        return this.finish(highest, "黑球落袋，本局结束", events);
       }
       this.state.phase = "aiming";
       this.state.lastMessage = `得分 +${points}，继续击球`;
@@ -729,10 +924,18 @@ export class MatchEngine {
     return false;
   }
 
+  private nextActivePlayer(from: PlayerIndex): PlayerIndex {
+    for (let step = 1; step <= this.state.playerCount; step += 1) {
+      const candidate = (from + step) % this.state.playerCount;
+      if (!this.state.eliminated[candidate]) return candidate;
+    }
+    return from;
+  }
+
   private switchPlayer(events: RuleEvent[]) {
     this.state.currentPlayer = this.state.practice
       ? 0
-      : otherPlayer(this.state.currentPlayer);
+      : this.nextActivePlayer(this.state.currentPlayer);
     this.state.currentBreak = 0;
     if (this.state.gameType === "snooker") {
       this.state.target.targetIsRed = this.redsRemaining() > 0;
@@ -769,6 +972,17 @@ export class MatchEngine {
     this.state.lastMessage = reason;
     this.state.phase = "gameOver";
     this.state.canRepositionCue = false;
+    const rest = Array.from(
+      { length: this.state.playerCount },
+      (_, index) => index,
+    )
+      .filter((index) => index !== winner)
+      .sort(
+        (a, b) =>
+          this.state.scores[b] - this.state.scores[a] ||
+          Number(this.state.eliminated[a]) - Number(this.state.eliminated[b]),
+      );
+    this.state.ranking = [winner, ...rest];
     events.push({ type: "gameOver", winner, reason });
     return events;
   }
@@ -849,7 +1063,12 @@ export class MatchEngine {
       if (target.x > Rack.baulk || target.distanceTo(centre) > Rack.sixth)
         return false;
     }
-    return !this.table.overlapsAny(target, this.table.cueball);
+    return !this.table.balls.some(
+      (ball) =>
+        ball !== this.table.cueball &&
+        ball.onTable() &&
+        ball.pos.distanceTo(target) < 2 * R,
+    );
   }
 
   private colourName(id: number): string {

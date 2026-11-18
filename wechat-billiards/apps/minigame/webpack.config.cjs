@@ -1,6 +1,7 @@
 const path = require("node:path")
 const webpack = require("webpack")
 const TerserPlugin = require("terser-webpack-plugin")
+const CopyPlugin = require("copy-webpack-plugin")
 
 module.exports = {
   entry: path.resolve(__dirname, "src/main.ts"),
@@ -32,6 +33,11 @@ module.exports = {
     __CLOUD_SERVICE__: JSON.stringify(process.env.CLOUDBASE_SERVICE ?? "hc-billiards"),
     __SOURCE_URL__: JSON.stringify(process.env.SOURCE_URL ?? ""),
     __LOCAL_SERVER_URL__: JSON.stringify(process.env.LOCAL_SERVER_URL ?? "ws://127.0.0.1:8080/ws"),
+  }), new CopyPlugin({
+    patterns: [{
+      from: path.resolve(__dirname, "../../third_party/billiards/dist/sounds"),
+      to: "sounds",
+    }],
   })],
   optimization: {
     minimize: true,
