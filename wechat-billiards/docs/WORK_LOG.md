@@ -8,8 +8,10 @@
 - 核心：快照 v2、2/3 人数组、v1 快照迁移；斯诺克自由球计分/目标推进、重摆黑球犯规判负、自由球提名限制。
 - 房间：建房直接试玩，好友加入后 3 秒倒计时自动开局；试玩击球不写正式记录；加入者离开回退试玩；服务重启恢复 trial/starting/playing。
 - 手感：P2 参数、杆法方向、预测线裁剪/渐隐、1.15× 默认播放与跳过、停球阈值、三种玩法摆球收紧。
-- 网络：微信端改为注入 `CLOUDBASE_ENV_ID`/`CLOUDBASE_SERVICE` 构建，通过 `wx.cloud.connectContainer` 连接；云托管 `hc-billiards` 升级到协议 v2。
-- 已知边界：卡牌与三人 UI 尚未接入（P4/P5）；微信真机双端和体验版验收仍需完成。
+- 网络：微信端改为注入 `CLOUDBASE_ENV_ID`/`CLOUDBASE_SERVICE` 构建，通过 `wx.cloud.connectContainer` 连接；云托管 `hc-billiards-004` 已上线协议 v2，健康接口 `ok: true`。
+- 源码：提交 `ebebd6d`、标签 `v0.3.1`，已推送 GitHub。
+- 微信端构建：`apps/minigame/dist/game.js` 909KiB，已包含云环境、服务名、协议 v2 和 `v0.3.1` 源码地址。
+- 已知边界：卡牌与三人 UI 尚未接入（P4/P5）；开发者工具 CLI 服务端口未开启，体验版上传待完成；微信真机双端验收仍需完成。
 
 ## 1. 当前状态
 
