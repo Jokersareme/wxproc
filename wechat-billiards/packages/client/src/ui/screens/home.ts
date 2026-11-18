@@ -5,7 +5,7 @@ import { colors, radius, typeScale, withAlpha } from "../theme";
 import type { Ui } from "../widgets";
 import { gameName } from "../format";
 
-const CLIENT_VERSION = "v0.3.3";
+const CLIENT_VERSION = "v0.4.0";
 
 interface Card {
   id: string;
@@ -26,15 +26,13 @@ const homeCards: Card[] = [
     id: "homeCards",
     glyph: "卡",
     title: "道具模式",
-    subtitle: "开局 3 张卡 · 后续开放",
-    locked: true,
+    subtitle: "开局 3 张卡 · 每回合 1 张",
   },
   {
     id: "homeThree",
     glyph: "3",
     title: "三人斯诺克",
-    subtitle: "BETA · 首期仅斯诺克",
-    locked: true,
+    subtitle: "3 人轮转 · 首期斯诺克",
   },
   {
     id: "homePractice",
@@ -338,7 +336,8 @@ function drawHomeCard(
 
 function drawHomeSheet(ui: Ui, model: HudModel) {
   const { layout } = ui;
-  const height = 300;
+  const mode = model.homeSheet ?? "classic";
+  const height = mode === "cards" || mode === "three" ? 380 : 300;
   const progress = Math.max(0, Math.min(1, model.homeSheetProgress ?? 1));
   const eased = 1 - Math.pow(1 - progress, 3);
   const y = layout.height - height * eased;
@@ -352,19 +351,73 @@ function drawHomeSheet(ui: Ui, model: HudModel) {
     },
   );
   ui.drawerHandle(0, y, layout.width);
-  const title = model.homeSheet === "practice" ? "单人练习" : "经典对战";
+  const title =
+    mode === "practice"
+      ? "单人练习"
+      : mode === "cards"
+        ? "道具模式"
+        : mode === "three"
+          ? "三人斯诺克"
+          : "经典对战";
   ui.text(title, layout.width / 2, y + 44, typeScale.h2, colors.ivory100, "center", 700);
   ui.text(
-    model.homeSheet === "practice"
+    mode === "practice"
       ? "选择玩法后直接开局，可随时重新摆球"
-      : "选择玩法，开始练习或创建好友房",
+      : mode === "cards"
+        ? "每回合最多 1 张卡；明牌、无隐藏随机"
+        : mode === "three"
+          ? "3 名玩家固定轮转，犯规罚给下一家"
+          : "选择玩法，开始练习或创建好友房",
     layout.width / 2,
     y + 76,
     15,
     colors.sage300,
     "center",
     500,
+    layout.width - 80,
   );
+
+  if (mode === "three") {
+    ui.panel(
+      layout.width / 2 - 270,
+      y + 104,
+      540,
+      86,
+      0.62,
+      radius.card,
+      colors.ink800,
+      withAlpha(colors.sage300, 0.18),
+    );
+    ui.text(
+      "座位 0 → 1 → 2 轮转 · 分数相同按单杆、进球数排名",
+      layout.width / 2,
+      y + 138,
+      16,
+      colors.ivory100,
+      "center",
+      600,
+      500,
+    );
+    ui.text(
+      "三人房需 3 人齐后自动开局；中间退出会跳过其回合",
+      layout.width / 2,
+      y + 168,
+      14,
+      colors.sage300,
+      "center",
+      500,
+      500,
+    );
+    ui.button("homeCreate", "创建三人房", layout.width / 2 - 180, y + 210, 360, 60, {
+      accent: true,
+    });
+    ui.button("homeClose", "返回", layout.width / 2 - 70, y + 326, 140, 36, {
+      ghost: true,
+      fontSize: 18,
+    });
+    return;
+  }
+
   const gameTypes: GameType[] = ["eightball", "nineball", "snooker"];
   const pillWidth = 150;
   const gap = 16;
@@ -380,7 +433,49 @@ function drawHomeSheet(ui: Ui, model: HudModel) {
       model.homeGameType === gameType,
     );
   });
-  if (model.homeSheet === "practice") {
+
+  if (mode === "cards") {
+    ui.text("手牌数量", startX, y + 184, 15, colors.sage300, "left", 600);
+    const counts = [0, 1, 2, 3, 4, 5, 6];
+    const countWidth = 46;
+    const countGap = 10;
+    const countX =
+      layout.width / 2 - (countWidth * counts.length + countGap * (counts.length - 1)) / 2;
+    counts.forEach((count, index) => {
+      ui.pill(
+        `createCardCount:${count}`,
+        String(count),
+        countX + index * (countWidth + countGap),
+        y + 168,
+        countWidth,
+        38,
+        model.createCardCount === count,
+      );
+    });
+    ui.text(
+      model.createCardCount === 0
+        ? "0 张 = 关闭卡牌，等价经典模式"
+        : "双方开局各发 N 张明牌，每回合最多用 1 张",
+      layout.width / 2,
+      y + 226,
+      14,
+      colors.sage500,
+      "center",
+      500,
+      layout.width - 90,
+    );
+    ui.button("homeStart", "开始练习", layout.width / 2 - 286, y + 252, 270, 60, {
+      accent: true,
+    });
+    ui.button("homeCreate", "创建好友房", layout.width / 2 + 16, y + 252, 270, 60);
+    ui.button("homeClose", "返回", layout.width / 2 - 70, y + 326, 140, 36, {
+      ghost: true,
+      fontSize: 18,
+    });
+    return;
+  }
+
+  if (mode === "practice") {
     ui.button("homeStart", "开始练习", layout.width / 2 - 180, y + 182, 360, 60, {
       accent: true,
     });
@@ -395,7 +490,6 @@ function drawHomeSheet(ui: Ui, model: HudModel) {
     fontSize: 18,
   });
 }
-
 function drawSettings(ui: Ui, model: HudModel) {
   const { layout } = ui;
   const width = Math.min(520, layout.width - 80);

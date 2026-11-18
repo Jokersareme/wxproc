@@ -1,4 +1,10 @@
-import type { MatchSnapshot } from "@friend-billiards/core";
+import {
+  defFor,
+  effectExpiryLabel,
+  effectKindLabel,
+  type CardId,
+  type MatchSnapshot,
+} from "@friend-billiards/core";
 import {
   gutter,
   safeBottom,
@@ -38,6 +44,7 @@ export function drawGame(ui: Ui, model: HudModel) {
   drawStatus(ui, model, snapshot);
   drawSliders(ui, model);
   drawActions(ui, model, snapshot);
+  if (snapshot.phase !== "gameOver") drawCardHand(ui, model, snapshot);
 
   if (snapshot.phase === "gameOver") drawGameOver(ui, model, snapshot);
   if (model.spinOpen) drawSpinModal(ui, model);
@@ -45,6 +52,7 @@ export function drawGame(ui: Ui, model: HudModel) {
   if (model.confirm) drawConfirm(ui, model);
   if (model.eventLogOpen) drawEventLog(ui, model);
   if (model.roomOverlayOpen) drawRoomOverlay(ui, model);
+  if (model.cardDetailUid) drawCardDetail(ui, model, snapshot);
   if (model.roomStatus === "starting") drawCountdown(ui, model);
   if (model.toast) ui.toast(model.toast, top + 150);
   if (model.foulFlashUntil && Date.now() < model.foulFlashUntil) {
@@ -142,6 +150,11 @@ function drawTopBar(
     return;
   }
 
+  if (snapshot.playerCount >= 3) {
+    drawThreePlayerBar(ui, model, snapshot, top, margin);
+    return;
+  }
+
   const leftX = Math.max(margin, safeLeft(layout) + 144);
   const rightX = layout.width - margin - cardWidth;
   const players = model.room?.players ?? [];
@@ -177,45 +190,217 @@ function drawTopBar(
   const gapRight = rightX;
   const centerX = (gapLeft + gapRight) / 2;
   const gapWidth = Math.max(80, gapRight - gapLeft - 12);
+  if (!snapshot.cards?.enabled) {
+    ui.text(
+      targetLabel(snapshot),
+      centerX,
+      top + 38,
+      layout.compact ? 15 : typeScale.body,
+      colors.ivory100,
+      "center",
+      600,
+      gapWidth,
+    );
+    ui.text(
+      `第 ${snapshot.shotNumber + 1} 杆`,
+      centerX,
+      top + 61,
+      14,
+      colors.sage500,
+      "center",
+      500,
+    );
+  } else {
+    ui.text(
+      `${targetLabel(snapshot)} · 第 ${snapshot.shotNumber + 1} 杆`,
+      layout.width / 2,
+      top + 94,
+      layout.compact ? 15 : typeScale.body,
+      colors.ivory100,
+      "center",
+      600,
+      layout.width - margin * 2,
+    );
+    drawEffectRow(ui, snapshot, 0, leftX + 10, top + 106, cardWidth - 20);
+    drawEffectRow(ui, snapshot, 1, rightX + 10, top + 106, cardWidth - 20);
+    const opponent = 1 - (model.playerIndex ?? 0);
+    const hand = snapshot.cards.hands[opponent] ?? [];
+    hand.slice(0, 8).forEach((card, index) => {
+      const x = rightX + cardWidth - 26 - index * 22;
+      ui.panel(
+        x,
+        top + 102,
+        20,
+        24,
+        0.92,
+        radius.control,
+        colors.ink900,
+        withAlpha(cardRarityColor(card.cardId), 0.7),
+      );
+      ui.text(
+        defFor(card.cardId).glyph,
+        x + 10,
+        top + 119,
+        13,
+        cardRarityColor(card.cardId),
+        "center",
+        700,
+      );
+    });
+  }
+}
+
+function drawThreePlayerBar(
+  ui: Ui,
+  model: HudModel,
+  snapshot: MatchSnapshot,
+  top: number,
+  margin: number,
+) {
+  const { layout } = ui;
+  const gap = 12;
+  const left = Math.max(margin, safeLeft(layout) + 144);
+  const right = layout.width - margin;
+  const width = (right - left - gap * 2) / 3;
+  const players = model.room?.players ?? [];
+  for (let index = 0; index < 3; index += 1) {
+    const player = players.find((entry) => entry.playerIndex === index);
+    const eliminated = snapshot.eliminated[index] ?? false;
+    const offline = player ? !player.connected : false;
+    const x = left + index * (width + gap);
+    ui.playerCard({
+      x,
+      y: top + 12,
+      width,
+      height: 64,
+      name: snapshot.players[index] ?? `玩家 ${index + 1}`,
+      subline: eliminated
+        ? "已退出"
+        : `${snapshot.scores[index] ?? 0} 分 · 最高 ${snapshot.bestBreak[index] ?? 0}`,
+      avatarColor:
+        [colors.player0, colors.player1, colors.player2][index] ??
+        colors.player1,
+      active: snapshot.currentPlayer === index && !eliminated,
+      offline: offline || eliminated,
+      badge:
+        snapshot.currentPlayer === index && snapshot.currentBreak > 0
+          ? `单杆 ${snapshot.currentBreak}`
+          : undefined,
+      pulse: (Date.now() % 1400) / 1400,
+    });
+  }
   ui.text(
     targetLabel(snapshot),
-    centerX,
-    top + 38,
+    layout.width / 2,
+    top + 90,
     layout.compact ? 15 : typeScale.body,
     colors.ivory100,
     "center",
     600,
-    gapWidth,
+    layout.width - margin * 2,
   );
   ui.text(
-    `第 ${snapshot.shotNumber + 1} 杆`,
-    centerX,
-    top + 61,
-    14,
+    `轮次 ${snapshot.currentPlayer + 1}/3 · 第 ${snapshot.shotNumber + 1} 杆`,
+    layout.width / 2,
+    top + 108,
+    13,
     colors.sage500,
     "center",
     500,
   );
 }
 
+function cardRarityColor(cardId: CardId) {
+  const rarity = defFor(cardId).rarity;
+  return rarity === "epic"
+    ? colors.brass300
+    : rarity === "rare"
+      ? colors.info400
+      : colors.sage300;
+}
+
+function drawEffectRow(
+  ui: Ui,
+  snapshot: MatchSnapshot,
+  player: number,
+  x: number,
+  y: number,
+  width: number,
+) {
+  const cards = snapshot.cards;
+  if (!cards?.enabled) return;
+  const effects = cards.active.filter(
+    (effect) =>
+      effect.target === player ||
+      (effect.target === null && effect.owner === player),
+  );
+  if (effects.length === 0) return;
+  let cursor = x;
+  effects.slice(0, 4).forEach((effect) => {
+    const label = `${effectKindLabel(effect.kind)}·${effectExpiryLabel(effect)}`;
+    const pillWidth = Math.min(120, ui.measure(label, 11, 600) + 14);
+    if (cursor + pillWidth > x + width) return;
+    ui.panel(
+      cursor,
+      y,
+      pillWidth,
+      20,
+      0.72,
+      radius.pill,
+      colors.ink900,
+      withAlpha(effect.owner === player ? colors.brass300 : colors.danger400, 0.5),
+    );
+    ui.text(
+      label,
+      cursor + pillWidth / 2,
+      y + 14,
+      11,
+      effect.owner === player ? colors.brass300 : colors.danger400,
+      "center",
+      600,
+      pillWidth - 4,
+    );
+    cursor += pillWidth + 6;
+  });
+}
+
 function drawStatus(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
+  const waitingSeat = model.room?.players.find(
+    (player) =>
+      player.playerIndex === snapshot.currentPlayer && !player.connected,
+  );
   const status =
-    model.roomStatus === "starting"
+    model.roomStatus === "playing" && waitingSeat
+      ? `等待 ${waitingSeat.displayName} 重连`
+      : model.roomStatus === "starting"
       ? "对局即将开始 · 3 秒后开局"
-      : model.trial && !model.animating
-        ? `试玩中 · 好友加入后自动开局 · 房间 ${model.roomCode ?? "------"}`
+      : model.roomStatus === "trial" &&
+          model.roomMode === "threeSnooker" &&
+          (model.room?.players.length ?? 0) < 3
+        ? `三人斯诺克 · 等待第三位玩家 · 房间 ${model.roomCode ?? "------"}`
+        : model.trial && !model.animating
+          ? `试玩中 · 好友加入后自动开局 · 房间 ${model.roomCode ?? "------"}`
         : (model.cameraMoving ? "镜头切换中" : model.message) ??
           (snapshot.phase === "ballInHand"
             ? "自由球：拖动白球到合法位置"
             : snapshot.canRepositionCue
               ? "任意球：可拖动白球调整，或点击台面瞄准"
               : (snapshot.lastMessage ?? "单击台面瞄准，拖动调力度"));
-  const view = tableViewport(ui.layout);
+  const view = tableViewport(ui.layout, {
+    cards: Boolean(snapshot.cards?.enabled),
+    players: snapshot.playerCount,
+  });
   const tableBottom = view.y + view.height;
-  const y = Math.max(
-    tableBottom + 10,
-    ui.layout.height - safeBottom(ui.layout) - 52,
-  );
+  const y =
+    cardHandCount(snapshot, model) > 0
+      ? Math.max(
+          tableBottom + 8,
+          ui.layout.height - safeBottom(ui.layout) - 150 - 64,
+        )
+      : Math.max(
+          tableBottom + 10,
+          ui.layout.height - safeBottom(ui.layout) - 52,
+        );
   const width = Math.min(760, ui.layout.width - 264);
   ui.statusBar(status, statusTone(status, snapshot), y, width, "eventLog");
   if (model.canSkip) {
@@ -332,7 +517,9 @@ function drawActions(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
       "nominate",
       "提名自由球",
       layout.width / 2 - 108,
-      layout.height - bottom - 130,
+      snapshot.cards?.enabled
+        ? layout.height - bottom - 206
+        : layout.height - bottom - 130,
       216,
       48,
       { ghost: true, fontSize: 16 },
@@ -340,7 +527,249 @@ function drawActions(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
   }
 }
 
+function cardHandCount(snapshot: MatchSnapshot, model: HudModel) {
+  const cards = snapshot.cards;
+  if (!cards?.enabled) return 0;
+  const player = model.playerIndex ?? snapshot.currentPlayer;
+  return cards.hands[player]?.length ?? 0;
+}
+
+function drawCardHand(
+  ui: Ui,
+  model: HudModel,
+  snapshot: MatchSnapshot,
+) {
+  const cards = snapshot.cards;
+  if (!cards?.enabled) return;
+  const player = model.playerIndex ?? snapshot.currentPlayer;
+  const hand = cards.hands[player] ?? [];
+  if (hand.length === 0) return;
+  const { layout } = ui;
+  const cardWidth = 96;
+  const cardHeight = 132;
+  const overlap = hand.length <= 5 ? 28 : hand.length >= 7 ? 46 : 36;
+  const step = cardWidth - overlap;
+  const total = cardWidth + (hand.length - 1) * step;
+  const startX = (layout.width - total) / 2;
+  const baseY =
+    layout.height - safeBottom(layout) - 18 - cardHeight;
+  ui.panel(
+    startX - 12,
+    baseY - 10,
+    total + 24,
+    cardHeight + 18,
+    0.72,
+    radius.card,
+    colors.ink900,
+    withAlpha(colors.brass400, 0.25),
+  );
+  const myTurn =
+    !model.online ||
+    snapshot.currentPlayer === (model.playerIndex ?? snapshot.currentPlayer);
+  const silenced = cards.active.some(
+    (effect) =>
+      effect.kind === "silence" &&
+      effect.target === player &&
+      effect.owner !== player,
+  );
+  hand.forEach((card, index) => {
+    const definition = defFor(card.cardId);
+    const selected = model.cardDetailUid === card.uid;
+    const x = startX + index * step;
+    const y = baseY - (selected ? 14 : 0);
+    const blocked = !myTurn || cards.playedThisTurn || silenced;
+    ui.context.save();
+    if (blocked) ui.context.globalAlpha = 0.5;
+    ui.panel(
+      x,
+      y,
+      cardWidth,
+      cardHeight,
+      0.97,
+      radius.card,
+      colors.ink800,
+      selected
+        ? colors.brass300
+        : withAlpha(cardRarityColor(card.cardId), 0.55),
+    );
+    ui.context.fillStyle = cardRarityColor(card.cardId);
+    ui.context.fillRect(x + 1, y + 1, cardWidth - 2, 5);
+    ui.context.fillStyle = withAlpha(colors.ink900, 0.72);
+    ui.context.beginPath();
+    ui.context.arc(x + cardWidth / 2, y + 44, 22, 0, Math.PI * 2);
+    ui.context.fill();
+    ui.text(
+      definition.glyph,
+      x + cardWidth / 2,
+      y + 53,
+      24,
+      cardRarityColor(card.cardId),
+      "center",
+      700,
+    );
+    ui.text(definition.name, x + cardWidth / 2, y + 82, 16, colors.ivory100, "center", 700, cardWidth - 8);
+    const lines = ui.wrap(definition.short, cardWidth - 12, 11, 500, 2);
+    lines.forEach((line, lineIndex) =>
+      ui.text(
+        line,
+        x + cardWidth / 2,
+        y + 102 + lineIndex * 14,
+        11,
+        colors.sage300,
+        "center",
+        500,
+        cardWidth - 8,
+      ),
+    );
+    ui.text(
+      "1/回合",
+      x + cardWidth - 6,
+      y + 16,
+      9,
+      colors.sage500,
+      "right",
+      600,
+    );
+    ui.context.restore();
+    ui.buttons.push({
+      id: `card:${card.uid}`,
+      label: definition.name,
+      x,
+      y,
+      width: cardWidth,
+      height: cardHeight,
+    });
+  });
+  if (cards.playedThisTurn)
+    ui.text(
+      "本回合已使用卡牌",
+      layout.width / 2,
+      baseY - 20,
+      13,
+      colors.brass300,
+      "center",
+      600,
+    );
+}
+
+function drawCardDetail(
+  ui: Ui,
+  model: HudModel,
+  snapshot: MatchSnapshot,
+) {
+  const cards = snapshot.cards;
+  const uid = model.cardDetailUid;
+  if (!cards?.enabled || !uid) return;
+  const player = model.playerIndex ?? snapshot.currentPlayer;
+  const card = (cards.hands[player] ?? []).find(
+    (entry) => entry.uid === uid,
+  );
+  if (!card) return;
+  const definition = defFor(card.cardId);
+  const { layout } = ui;
+  const width = Math.min(580, layout.width - 60);
+  const height = 340;
+  const x = (layout.width - width) / 2;
+  const y = layout.height - height - 12;
+  ui.modal(
+    { x, y, width, height },
+    { opacity: 0.99, stroke: withAlpha(colors.brass400, 0.45) },
+  );
+  ui.text(definition.name, x + 28, y + 46, 28, colors.brass300, "left", 700);
+  const rarity =
+    definition.rarity === "epic"
+      ? "史诗"
+      : definition.rarity === "rare"
+        ? "稀有"
+        : "普通";
+  ui.text(
+    `${rarity} · ${definition.modes.map(gameName).join(" / ")} · 每回合 1 张`,
+    x + width - 28,
+    y + 44,
+    14,
+    colors.sage300,
+    "right",
+    500,
+    width - 220,
+  );
+  ui.divider(x + 28, y + 68, width - 56);
+  const lines = ui.wrap(definition.description, width - 56, 17, 500, 4);
+  lines.forEach((line, index) =>
+    ui.text(
+      line,
+      x + 28,
+      y + 100 + index * 24,
+      17,
+      colors.ivory100,
+      "left",
+      500,
+      width - 56,
+    ),
+  );
+  ui.text(
+    definition.target === "objectBall"
+      ? "目标：选择一颗球" + (definition.id === "shuffle" ? "，再选择落点" : "")
+      : definition.target === "effect"
+        ? "目标：选择一个对手效果"
+        : "目标：无需选择",
+    x + 28,
+    y + 196,
+    14,
+    colors.sage500,
+    "left",
+    500,
+    width - 56,
+  );
+  if (model.cardEffectPick) {
+    const effects = cards.active.filter(
+      (effect) => effect.owner !== player,
+    );
+    if (effects.length === 0)
+      ui.text(
+        "对手没有可移除的效果",
+        x + 28,
+        y + 236,
+        15,
+        colors.sage300,
+        "left",
+        500,
+      );
+    effects.slice(0, 4).forEach((effect, index) => {
+      const buttonWidth = (width - 56 - 12) / 2;
+      const column = index % 2;
+      const row = Math.floor(index / 2);
+      ui.button(
+        `cardEffect:${effect.effectId}`,
+        `${effectKindLabel(effect.kind)} · ${effectExpiryLabel(effect)}`,
+        x + 28 + column * (buttonWidth + 12),
+        y + 220 + row * 44,
+        buttonWidth,
+        38,
+        { ghost: true, fontSize: 14 },
+      );
+    });
+  } else {
+    ui.button("cardUse", "使用", x + 28, y + height - 64, 220, 48, {
+      accent: true,
+      fontSize: 18,
+    });
+  }
+  ui.button(
+    "cardCancel",
+    "取消",
+    x + width - 208,
+    y + height - 64,
+    180,
+    48,
+    { ghost: true, fontSize: 18 },
+  );
+}
+
 function drawGameOver(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
+  if (snapshot.playerCount >= 3) {
+    drawThreeGameOver(ui, model, snapshot);
+    return;
+  }
   const { layout } = ui;
   const width = Math.min(640, layout.width - 80);
   const height = 360;
@@ -409,6 +838,134 @@ function drawGameOver(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
   });
 }
 
+function drawThreeGameOver(
+  ui: Ui,
+  model: HudModel,
+  snapshot: MatchSnapshot,
+) {
+  const { layout } = ui;
+  const width = Math.min(760, layout.width - 60);
+  const height = 440;
+  const x = (layout.width - width) / 2;
+  const y = (layout.height - height) / 2;
+  ui.panel(
+    x,
+    y,
+    width,
+    height,
+    0.97,
+    radius.card,
+    colors.ink900,
+    withAlpha(colors.brass400, 0.45),
+  );
+  ui.text(
+    "本局结束",
+    layout.width / 2,
+    y + 46,
+    typeScale.h1,
+    colors.brass300,
+    "center",
+    700,
+  );
+  const title =
+    snapshot.winner === null
+      ? "并列第一"
+      : snapshot.winner === model.playerIndex
+        ? "你赢了"
+        : `${snapshot.players[snapshot.winner]} 获胜`;
+  ui.text(title, layout.width / 2, y + 96, 30, colors.ivory100, "center", 700);
+  ui.text(
+    snapshot.endReason ?? "",
+    layout.width / 2,
+    y + 132,
+    15,
+    colors.sage300,
+    "center",
+    500,
+    width - 60,
+  );
+  const key = (index: number) =>
+    `${snapshot.scores[index] ?? 0}:${snapshot.bestBreak[index] ?? 0}:${snapshot.pots[index] ?? 0}`;
+  const order =
+    snapshot.ranking.length > 0
+      ? snapshot.ranking
+      : snapshot.players.map((_, index) => index);
+  let rank = 0;
+  let previous = "";
+  order.forEach((index, row) => {
+    const rowY = y + 160 + row * 58;
+    const eliminated = snapshot.eliminated[index] ?? false;
+    let label = `${row + 1}`;
+    if (!eliminated) {
+      if (key(index) !== previous) rank = row + 1;
+      previous = key(index);
+      label = `${rank}`;
+    }
+    ui.panel(
+      x + 32,
+      rowY,
+      width - 64,
+      50,
+      0.62,
+      radius.card,
+      colors.ink800,
+      withAlpha(
+        !eliminated && row === 0 ? colors.brass300 : colors.sage500,
+        0.28,
+      ),
+    );
+    ui.text(
+      eliminated ? "—" : label,
+      x + 60,
+      rowY + 31,
+      20,
+      !eliminated && row === 0 ? colors.brass300 : colors.sage300,
+      "center",
+      700,
+    );
+    ui.text(
+      snapshot.players[index] ?? `玩家 ${index + 1}`,
+      x + 92,
+      rowY + 31,
+      19,
+      eliminated ? withAlpha(colors.ivory100, 0.45) : colors.ivory100,
+      "left",
+      700,
+      width * 0.3,
+    );
+    ui.text(
+      eliminated
+        ? "已退出"
+        : `${snapshot.scores[index] ?? 0} 分 · 单杆 ${snapshot.bestBreak[index] ?? 0} · 进球 ${snapshot.pots[index] ?? 0}`,
+      x + width - 60,
+      rowY + 31,
+      16,
+      eliminated ? colors.danger400 : colors.sage300,
+      "right",
+      600,
+      width * 0.5,
+    );
+  });
+  ui.button(
+    "rematch",
+    model.online ? "再来一局" : "重新开局",
+    x + 56,
+    y + height - 76,
+    240,
+    56,
+    { accent: true },
+  );
+  ui.button(
+    "exit",
+    "返回大厅",
+    x + width - 296,
+    y + height - 76,
+    240,
+    56,
+    { ghost: true },
+  );
+}
+
 function drawSpinModal(ui: Ui, model: HudModel) {
   const { layout } = ui;
   const centerX = layout.width / 2;
@@ -442,9 +999,10 @@ function drawSpinModal(ui: Ui, model: HudModel) {
   ui.context.moveTo(centerX, discY - SPIN_RADIUS);
   ui.context.lineTo(centerX, discY + SPIN_RADIUS);
   ui.context.stroke();
+  const spinReach = Math.max(SPIN_LIMIT, model.spinLimit || SPIN_LIMIT);
   ui.dot(
-    centerX + (model.spinX / SPIN_LIMIT) * SPIN_RADIUS,
-    discY + (model.spinY / SPIN_LIMIT) * SPIN_RADIUS,
+    centerX + (model.spinX / spinReach) * SPIN_RADIUS,
+    discY + (model.spinY / spinReach) * SPIN_RADIUS,
     12,
     colors.ivory100,
   );
@@ -543,12 +1101,13 @@ export interface MenuMetrics {
   maxScroll: number;
 }
 
-function menuContentHeight(expanded: boolean) {
+function menuContentHeight(expanded: boolean, cardsRow = false) {
   return (
     8 +
     (expanded ? ROOM_SETTINGS_EXPANDED : ROOM_SETTINGS_COLLAPSED) +
     12 +
     MENU_ROW * 3 +
+    (cardsRow ? MENU_ROW : 0) +
     16 +
     1 +
     14 +
@@ -560,8 +1119,15 @@ function menuContentHeight(expanded: boolean) {
   );
 }
 
-export function menuMetrics(layout: Layout, expanded: boolean): MenuMetrics {
-  const height = Math.min(expanded ? 620 : 520, layout.height - 64);
+export function menuMetrics(
+  layout: Layout,
+  expanded: boolean,
+  cardsRow = false,
+): MenuMetrics {
+  const height = Math.min(
+    expanded ? 620 : cardsRow ? 580 : 520,
+    layout.height - 64,
+  );
   const y = layout.height - height;
   const contentTop = y + 74;
   const contentBottom = y + height - 72;
@@ -571,7 +1137,10 @@ export function menuMetrics(layout: Layout, expanded: boolean): MenuMetrics {
     height,
     contentTop,
     contentBottom,
-    maxScroll: Math.max(0, menuContentHeight(expanded) - view),
+    maxScroll: Math.max(
+      0,
+      menuContentHeight(expanded, cardsRow) - view,
+    ),
   };
 }
 
@@ -579,7 +1148,10 @@ function drawMenu(ui: Ui, model: HudModel) {
   const { layout } = ui;
   const margin = gutter(layout);
   const expanded = model.roomSettingsOpen;
-  const metrics = menuMetrics(layout, expanded);
+  const cardsRow = Boolean(
+    !model.online && model.practiceMode && model.snapshot?.cards?.enabled,
+  );
+  const metrics = menuMetrics(layout, expanded, cardsRow);
   const scroll = Math.max(0, Math.min(metrics.maxScroll, model.menuScroll));
   ui.modal(
     { x: 0, y: metrics.y, width: layout.width, height: metrics.height },
@@ -619,6 +1191,21 @@ function drawMenu(ui: Ui, model: HudModel) {
   y += 12;
 
   const rowX = layout.width - margin - 120;
+  if (cardsRow) {
+    ui.text("手牌数量", margin, y + 25, 17, colors.ivory100, "left", 600);
+    for (let count = 0; count <= 6; count += 1) {
+      ui.pill(
+        `practiceCardCount:${count}`,
+        String(count),
+        layout.width - margin - (7 - count) * 54,
+        y + 4,
+        46,
+        38,
+        model.practiceCardCount === count,
+      );
+    }
+    y += MENU_ROW;
+  }
   ui.text("音效", margin, y + 25, 17, colors.ivory100, "left", 600);
   ui.pill("sound", model.soundOn ? "开" : "关", rowX, y + 4, 120, 38, model.soundOn);
   y += MENU_ROW;
@@ -679,10 +1266,18 @@ function drawMenu(ui: Ui, model: HudModel) {
       fontSize: 16,
     });
   } else {
-    ui.button("concede", "认输", margin, y, 120, 46, {
-      danger: true,
-      fontSize: 16,
-    });
+    ui.button(
+      "concede",
+      (model.snapshot?.playerCount ?? 2) >= 3 ? "退出本局" : "认输",
+      margin,
+      y,
+      120,
+      46,
+      {
+        danger: true,
+        fontSize: 16,
+      },
+    );
     ui.button("exit", "退出对局", margin + 132, y, 140, 46, {
       danger: true,
       fontSize: 16,
@@ -720,7 +1315,7 @@ function drawMenu(ui: Ui, model: HudModel) {
     const thumbHeight = Math.max(
       40,
       trackHeight *
-        (1 - metrics.maxScroll / menuContentHeight(expanded)),
+        (1 - metrics.maxScroll / menuContentHeight(expanded, cardsRow)),
     );
     const thumbTop =
       trackTop +
@@ -762,7 +1357,9 @@ function drawRoomSettings(
   expanded: boolean,
 ) {
   const online = !model.practiceMode && Boolean(model.room);
-  const host = online && model.playerIndex === 0;
+  const host =
+    online &&
+    (model.room?.hostPlayerIndex ?? 0) === (model.playerIndex ?? 0);
   const editable = !online || host;
   const aimLevel = model.practiceMode
     ? model.practicePredictionLevel
@@ -946,7 +1543,9 @@ function drawCountdown(ui: Ui, model: HudModel) {
     800,
   );
   ui.text(
-    "好友已加入，准备开局",
+    model.room?.mode === "threeSnooker"
+      ? "三人已到齐，准备开局"
+      : "好友已加入，准备开局",
     layout.width / 2,
     y + height + 26,
     16,
@@ -984,7 +1583,7 @@ function drawRoomOverlay(ui: Ui, model: HudModel) {
   const room = model.room;
   const mode = roomModeNames[room?.mode ?? model.roomMode] ?? "经典";
   ui.text(
-    `${gameName(room?.gameType ?? "eightball")} · ${mode} · ${room?.players.length ?? 1}/${room?.maxPlayers ?? 2}`,
+    `${gameName(room?.gameType ?? "eightball")} · ${mode}${room?.mode === "cards" ? ` ${room.cardCount} 张` : ""} · ${room?.players.length ?? 1}/${room?.maxPlayers ?? 2}`,
     layout.width / 2,
     y + 80,
     16,

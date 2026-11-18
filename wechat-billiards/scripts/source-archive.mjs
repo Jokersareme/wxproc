@@ -19,6 +19,7 @@ const result = spawnSync(
     "--exclude=artifacts",
     "--exclude=apps/server/data/rooms.json",
     "--exclude=.env",
+    "--exclude=*.baiduyun.uploading.cfg",
     ".",
   ],
   { stdio: "inherit", shell: false },

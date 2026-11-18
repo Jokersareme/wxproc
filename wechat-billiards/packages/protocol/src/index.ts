@@ -1,4 +1,6 @@
 import type {
+  CardEvent,
+  CardId,
   GameType,
   MatchSnapshot,
   PhysicsEvent,
@@ -8,6 +10,8 @@ import type {
 } from "@friend-billiards/core";
 
 export type {
+  CardEvent,
+  CardId,
   GameType,
   MatchSnapshot,
   PhysicsEvent,
@@ -69,6 +73,14 @@ export type ClientMessage = BaseMessage &
       }
     | { type: "placeBall"; matchId: string; x: number; y: number }
     | { type: "nominateFreeBall"; matchId: string; ballId: number }
+    | {
+        type: "playCard";
+        matchId: string;
+        cardUid: string;
+        targetBallId?: number;
+        targetPos?: { x: number; y: number };
+        targetEffectId?: string;
+      }
     | { type: "shoot"; matchId: string; shotId: string; input: ShotInput }
     | { type: "sync"; matchId: string }
     | { type: "rematch"; matchId: string }
@@ -96,6 +108,7 @@ export interface RoomState {
   playbackSpeed: number;
   cameraViews: RoomCameraView[];
   status: RoomStatus;
+  hostPlayerIndex: PlayerIndex;
   playerCount: number;
   maxPlayers: 2 | 3;
   startAt: number | null;
@@ -130,11 +143,32 @@ export type ServerMessage = BaseMessage &
         input: ShotInput;
         events: PhysicsEvent[];
         ruleEvents: RuleEvent[];
+        cardEvents?: CardEvent[];
         snapshot: MatchSnapshot;
         stateHash: string;
         durationMs: number;
       }
-    | { type: "opponent"; matchId: string; connected: boolean }
+    | {
+        type: "card";
+        room: RoomState;
+        matchId: string;
+        seq: number;
+        player: PlayerIndex;
+        cardUid: string;
+        cardId: CardId;
+        targetBallId: number | null;
+        targetPos: { x: number; y: number } | null;
+        targetEffectId: string | null;
+        events: CardEvent[];
+        snapshot: MatchSnapshot;
+        stateHash: string;
+      }
+    | {
+        type: "opponent";
+        matchId: string;
+        connected: boolean;
+        player?: PlayerIndex;
+      }
     | { type: "roomClosed"; matchId: string; reason: string }
     | { type: "pong"; nonce?: number; serverTime: number }
     | { type: "error"; code: string; message: string }
@@ -330,6 +364,49 @@ export function parseClientMessage(value: unknown): ClientMessage {
         matchId: value.matchId,
         ballId: value.ballId as number,
       };
+    case "playCard": {
+      if (!string(value.matchId, 64) || !string(value.cardUid, 96))
+        throw new Error("卡牌消息无效");
+      if (
+        value.targetBallId !== undefined &&
+        (!Number.isInteger(value.targetBallId) ||
+          (value.targetBallId as number) < 0)
+      )
+        throw new Error("卡牌目标球无效");
+      if (value.targetPos !== undefined) {
+        if (
+          !isObject(value.targetPos) ||
+          !finite(value.targetPos.x) ||
+          !finite(value.targetPos.y)
+        )
+          throw new Error("卡牌目标位置无效");
+      }
+      if (
+        value.targetEffectId !== undefined &&
+        !string(value.targetEffectId, 120)
+      )
+        throw new Error("卡牌目标效果无效");
+      return {
+        ...base,
+        type: "playCard",
+        matchId: value.matchId,
+        cardUid: value.cardUid,
+        ...(value.targetBallId !== undefined
+          ? { targetBallId: value.targetBallId as number }
+          : {}),
+        ...(value.targetPos !== undefined
+          ? {
+              targetPos: {
+                x: (value.targetPos as any).x,
+                y: (value.targetPos as any).y,
+              },
+            }
+          : {}),
+        ...(value.targetEffectId !== undefined
+          ? { targetEffectId: value.targetEffectId as string }
+          : {}),
+      };
+    }
     case "shoot":
       if (
         !string(value.matchId, 64) ||

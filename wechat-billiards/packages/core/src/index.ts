@@ -6,6 +6,21 @@ export {
   stopSlowBall,
   validateShotInput,
 } from "./engine";
+export {
+  CARD_DEFINITIONS,
+  CARD_IDS,
+  CardRuleError,
+  cardsForGame,
+  createCardState,
+  dealCards,
+  defFor,
+  effectExpiryLabel,
+  effectKindLabel,
+  expireCardEffects,
+  mulberry32,
+  practiceCardPool,
+  shotModifiers,
+} from "./cards";
 export { hashSnapshot } from "./hash";
 export { tableDimensions } from "./geometry";
 export {
@@ -15,8 +30,20 @@ export {
   tunedMaxPower,
 } from "./tuning";
 export type {
+  ActiveEffect,
   BallGroup,
   BallSnapshot,
+  CardDefinition,
+  CardEffectKind,
+  CardEvent,
+  CardId,
+  CardInstance,
+  CardPlayRequest,
+  CardPlayResult,
+  CardRarity,
+  CardState,
+  CardTarget,
+  CardTiming,
   CreateMatchOptions,
   FrameBall,
   GameType,
@@ -27,6 +54,7 @@ export type {
   RuleEvent,
   ShotFrame,
   ShotInput,
+  ShotModifiers,
   ShotResult,
   SnookerTarget,
   Vec3Data,

@@ -77,9 +77,13 @@ export function groupDots(snapshot: MatchSnapshot, player: number) {
   );
 }
 
-export function playerSubline(snapshot: MatchSnapshot, player: 0 | 1) {
+export function playerSubline(snapshot: MatchSnapshot, player: number) {
+  const active = snapshot.currentPlayer === player;
+  const breakText = active
+    ? `单杆 ${snapshot.currentBreak}`
+    : `最高 ${snapshot.bestBreak[player] ?? 0}`;
   if (snapshot.gameType === "snooker") {
-    return `${snapshot.scores[player]} 分 · 单杆 ${snapshot.currentBreak}`;
+    return `${snapshot.scores[player] ?? 0} 分 · ${breakText}`;
   }
   if (snapshot.gameType === "nineball") {
     const lowest = snapshot.balls
@@ -93,10 +97,11 @@ export function playerSubline(snapshot: MatchSnapshot, player: 0 | 1) {
       )
       .map((ball) => ball.label!)
       .sort((a, b) => a - b)[0];
-    return lowest ? `最低 ${lowest} 号` : "清台中";
+    const lowestText = lowest ? `最低 ${lowest} 号` : "清台中";
+    return `${lowestText} · 进 ${snapshot.pots[player] ?? 0}`;
   }
   const group = snapshot.groups[player];
-  if (group === "open") return "开放球局";
+  if (group === "open") return `开放球局 · 进 ${snapshot.pots[player] ?? 0}`;
   return `${groupName(group)} · 剩 ${remainingGroupBalls(snapshot, player)}`;
 }
 

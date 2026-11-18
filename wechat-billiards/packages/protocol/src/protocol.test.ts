@@ -206,6 +206,57 @@ describe("protocol validation", () => {
     ).toThrow("预测线档位");
   });
 
+  it("validates card plays and their optional targets", () => {
+    const plain = parseClientMessage({
+      ...base,
+      type: "playCard",
+      matchId: "m1",
+      cardUid: "seed-0-0",
+    }) as any;
+    expect(plain.type).toBe("playCard");
+    expect(plain.targetBallId).toBeUndefined();
+
+    const targeted = parseClientMessage({
+      ...base,
+      type: "playCard",
+      matchId: "m1",
+      cardUid: "seed-0-0",
+      targetBallId: 5,
+      targetPos: { x: 0.1, y: -0.2 },
+      targetEffectId: "freeze:1:0:0",
+    }) as any;
+    expect(targeted.targetBallId).toBe(5);
+    expect(targeted.targetPos).toEqual({ x: 0.1, y: -0.2 });
+    expect(targeted.targetEffectId).toBe("freeze:1:0:0");
+
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "playCard",
+        matchId: "m1",
+        cardUid: 42,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "playCard",
+        matchId: "m1",
+        cardUid: "x",
+        targetBallId: 1.5,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseClientMessage({
+        ...base,
+        type: "playCard",
+        matchId: "m1",
+        cardUid: "x",
+        targetPos: { x: NaN, y: 0 },
+      }),
+    ).toThrow();
+  });
+
   it("rejects non-finite physics values and unknown commands", () => {
     expect(() =>
       parseClientMessage({

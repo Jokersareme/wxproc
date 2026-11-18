@@ -77,6 +77,12 @@ class Client {
     return message;
   }
 
+  lastRoom() {
+    return [...this.messages]
+      .reverse()
+      .find((message) => message.type === "room");
+  }
+
   close() {
     this.socket?.close();
   }
@@ -355,8 +361,206 @@ try {
   )
     throw new Error("再来一局双端房间设置不一致");
 
+  const cardsHost = new Client();
+  const cardsGuest = new Client();
+  await cardsHost.connect(restartedPort);
+  await cardsGuest.connect(restartedPort);
+  await cardsHost.login("e2e-cards-host");
+  await cardsGuest.login("e2e-cards-guest");
+  const cardsRoom = await cardsHost.request(
+    {
+      type: "createRoom",
+      gameType: "eightball",
+      predictionLevel: 2,
+      mode: "cards",
+      cardCount: 6,
+    },
+    (m) => m.type === "room",
+  );
+  await cardsGuest.request(
+    {
+      type: "joinRoom",
+      roomCode: cardsRoom.room.roomCode,
+      inviteToken: cardsRoom.room.inviteToken,
+    },
+    (m) => m.type === "room" && m.room.status === "starting",
+  );
+  const cardsPlaying = await cardsHost.wait(
+    (m) => m.type === "room" && m.room.status === "playing",
+    cardsHost.messages.length - 1,
+    10000,
+  );
+  if (
+    !cardsPlaying.snapshot.cards?.enabled ||
+    cardsPlaying.snapshot.cards.hands[0].length !== 6
+  )
+    throw new Error("卡牌房未发放手牌");
+  const targetless = new Set([
+    "eagle_eye",
+    "cannon",
+    "feather",
+    "deep_spin",
+    "silence",
+    "shield",
+    "swap_hand",
+    "spring",
+    "steal",
+    "freeze",
+  ]);
+  const chosen = cardsPlaying.snapshot.cards.hands[0].find((card) =>
+    targetless.has(card.cardId),
+  );
+  if (!chosen) throw new Error("卡牌房没有可直接使用的手牌");
+  const cardHostStart = cardsHost.messages.length;
+  const cardGuestStart = cardsGuest.messages.length;
+  cardsHost.send({
+    type: "playCard",
+    matchId: cardsPlaying.room.matchId,
+    cardUid: chosen.uid,
+  });
+  const cardOnHost = await cardsHost.wait(
+    (m) => m.type === "card",
+    cardHostStart,
+  );
+  const cardOnGuest = await cardsGuest.wait(
+    (m) => m.type === "card",
+    cardGuestStart,
+  );
+  if (
+    cardOnHost.stateHash !== cardOnGuest.stateHash ||
+    cardOnHost.snapshot.cards.hands[0].length !== 5
+  )
+    throw new Error("卡牌结算双端不一致");
+  const secondCard = cardOnHost.snapshot.cards.hands[0][0];
+  const secondError = await cardsHost.request(
+    {
+      type: "playCard",
+      matchId: cardsPlaying.room.matchId,
+      cardUid: secondCard.uid,
+    },
+    (m) => m.type === "error",
+  );
+  if (secondError.code !== "CARD_ALREADY_PLAYED")
+    throw new Error("同一回合第二张卡未被拒绝");
+  const cardsShotStart = cardsHost.messages.length;
+  cardsHost.send({
+    type: "shoot",
+    matchId: cardsPlaying.room.matchId,
+    shotId: "cards-shot-1",
+    input: { angle: Math.PI, power: 0.02, spinX: 0, spinY: 0, elevation: 0 },
+  });
+  const cardsShot = await cardsHost.wait(
+    (m) => m.type === "shot",
+    cardsShotStart,
+  );
+  const shotOnly = new Set([
+    "eagle_eye",
+    "cannon",
+    "feather",
+    "deep_spin",
+    "spring",
+  ]);
+  if (
+    shotOnly.has(chosen.cardId) &&
+    cardsShot.snapshot.cards.active.some(
+      (effect) => effect.owner === 0 && effect.expires === "shot",
+    )
+  )
+    throw new Error("击球后本杆卡牌效果未清除");
+
+  const third = new Client();
+  await third.connect(restartedPort);
+  await third.login("e2e-third");
+  const threeRoom = await cardsHost.request(
+    {
+      type: "createRoom",
+      gameType: "snooker",
+      predictionLevel: 0,
+      mode: "threeSnooker",
+    },
+    (m) => m.type === "room",
+  );
+  await cardsGuest.request(
+    {
+      type: "joinRoom",
+      roomCode: threeRoom.room.roomCode,
+      inviteToken: threeRoom.room.inviteToken,
+    },
+    (m) => m.type === "room" && m.snapshot.practice === false,
+  );
+  const warmup = cardsGuest.lastRoom();
+  if (
+    !warmup ||
+    warmup.room.status !== "trial" ||
+    warmup.snapshot.playerCount !== 2
+  )
+    throw new Error("第二个玩家加入后未进入两人热身");
+  const threeStart = cardsHost.messages.length;
+  const thirdStart = third.messages.length;
+  await third.request(
+    {
+      type: "joinRoom",
+      roomCode: threeRoom.room.roomCode,
+      inviteToken: threeRoom.room.inviteToken,
+    },
+    (m) => m.type === "room" && m.room.status === "starting",
+  );
+  const threePlaying = await third.wait(
+    (m) => m.type === "room" && m.room.status === "playing",
+    thirdStart,
+    10000,
+  );
+  const threePlayingHost = await cardsHost.wait(
+    (m) => m.type === "room" && m.room.status === "playing",
+    threeStart,
+    10000,
+  );
+  if (
+    threePlaying.snapshot.playerCount !== 3 ||
+    threePlaying.snapshot.currentPlayer !== 0 ||
+    threePlayingHost.stateHash !== threePlaying.stateHash
+  )
+    throw new Error("三人局未按 3 人开局或三端哈希不一致");
+  const threeShotStart = third.messages.length;
+  cardsHost.send({
+    type: "shoot",
+    matchId: threePlaying.room.matchId,
+    shotId: "three-e2e-1",
+    input: { angle: Math.PI, power: 0.02, spinX: 0, spinY: 0, elevation: 0 },
+  });
+  const threeShot = await third.wait(
+    (m) => m.type === "shot",
+    threeShotStart,
+  );
+  if (
+    threeShot.snapshot.currentPlayer !== 1 ||
+    threeShot.snapshot.playerCount !== 3
+  )
+    throw new Error("三人局轮转错误");
+  await cardsGuest.request(
+    { type: "concede", matchId: threePlaying.room.matchId },
+    (m) => m.type === "room" && m.snapshot.eliminated?.[1] === true,
+  );
+  const threeEndStart = cardsHost.messages.length;
+  await third.request(
+    { type: "concede", matchId: threePlaying.room.matchId },
+    (m) => m.type === "room" && m.room.status === "gameOver",
+  );
+  const threeEnd = await cardsHost.wait(
+    (m) => m.type === "room" && m.room.status === "gameOver",
+    threeEndStart,
+  );
+  if (
+    threeEnd.snapshot.winner !== 0 ||
+    threeEnd.snapshot.ranking[0] !== 0
+  )
+    throw new Error("三人局结算排名错误");
+
   reconnected.close();
   reconnectedGuest.close();
+  cardsHost.close();
+  cardsGuest.close();
+  third.close();
   console.log(
     JSON.stringify(
       {
@@ -381,6 +585,11 @@ try {
           "concede",
           "rematch-countdown",
           "rematch-prediction",
+          "cards-deal-play",
+          "cards-turn-limit",
+          "three-warmup",
+          "three-start-rotation",
+          "three-exit-ranking",
         ],
         stateHash: secondPlacement.stateHash,
       },

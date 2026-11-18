@@ -137,11 +137,17 @@ export class Hud {
     );
   }
 
-  spinAt(x: number, y: number): { x: number; y: number } {
+  spinAt(
+    x: number,
+    y: number,
+    limit = SPIN_LIMIT,
+  ): { x: number; y: number } {
     const point = clientToDesign(x, y, this.layout);
+    const reach = Math.max(SPIN_LIMIT, Math.min(0.65, limit));
     return clampSpin(
-      ((point.x - this.layout.width / 2) / SPIN_RADIUS) * SPIN_LIMIT,
-      ((point.y - 360) / SPIN_RADIUS) * SPIN_LIMIT,
+      ((point.x - this.layout.width / 2) / SPIN_RADIUS) * reach,
+      ((point.y - 360) / SPIN_RADIUS) * reach,
+      reach,
     );
   }
 

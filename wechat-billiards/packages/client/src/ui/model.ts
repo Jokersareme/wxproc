@@ -6,7 +6,7 @@ import type {
 } from "@friend-billiards/protocol";
 
 export type Screen = "home" | "friend" | "room" | "game" | "license";
-export type HomeSheet = "classic" | "practice" | null;
+export type HomeSheet = "classic" | "practice" | "cards" | "three" | null;
 export type CameraMode = "top" | "follow" | "overview";
 export type QualityTier = "high" | "medium" | "low";
 
@@ -62,4 +62,12 @@ export interface HudModel {
   eventLog: { at: number; text: string }[];
   eventLogOpen: boolean;
   foulFlashUntil?: number;
+  cardDetailUid?: string;
+  cardTargetUid?: string;
+  cardTargetBallId?: number;
+  cardEffectPick?: boolean;
+  spinLimit: number;
+  createMode: "classic" | "cards" | "threeSnooker";
+  createCardCount: number;
+  practiceCardCount: number;
 }

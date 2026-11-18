@@ -30,6 +30,12 @@ export interface StoredShot {
   message: Extract<ServerMessage, { type: "shot" }>;
 }
 
+export interface StoredCardMessage {
+  cardUid: string;
+  player: PlayerIndex;
+  message: Extract<ServerMessage, { type: "card" }>;
+}
+
 export interface RoomRecord {
   roomCode: string;
   inviteToken: string;
@@ -51,6 +57,7 @@ export interface RoomRecord {
   seq: number;
   rematchUserIds: string[];
   shots: StoredShot[];
+  cardMessages: StoredCardMessage[];
   updatedAt: number;
 }
 

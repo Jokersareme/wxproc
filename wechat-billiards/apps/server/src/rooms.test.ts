@@ -221,7 +221,13 @@ describe("authoritative room service", () => {
     const startingRestore = new RoomService(repository);
     await startingRestore.restore();
     const startSocket = context("host", "房主");
+    const startGuest = context("guest", "球友");
     await startingRestore.handle(startSocket.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "sync",
+      matchId: starting.room.matchId,
+    });
+    await startingRestore.handle(startGuest.context, {
       protocolVersion: PROTOCOL_VERSION,
       type: "sync",
       matchId: starting.room.matchId,
@@ -515,4 +521,111 @@ describe("authoritative room service", () => {
     expect(three.room.maxPlayers).toBe(3);
     expect(three.room.gameType).toBe("snooker");
   });
+
+
+  it("deals cards, broadcasts plays and rejects a second card in the turn", async () => {
+    const service = new RoomService(new MemoryRoomRepository());
+    const created = await createTrialRoom(service, 0, "cards");
+    const guest = context("guest", "球友");
+    await service.handle(guest.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "joinRoom",
+      roomCode: created.room.roomCode,
+      inviteToken: created.room.inviteToken,
+    });
+    await jest.advanceTimersByTimeAsync(3000);
+    const playing = created.host.socket.last("room");
+    expect(playing.room.status).toBe("playing");
+    expect(playing.snapshot.cards.enabled).toBe(true);
+    expect(playing.snapshot.cards.hands[0]).toHaveLength(3);
+    expect(playing.snapshot.cards.hands[1]).toHaveLength(3);
+
+    const firstUid = playing.snapshot.cards.hands[0][0].uid;
+    await service.handle(created.host.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "playCard",
+      matchId: created.room.matchId,
+      cardUid: firstUid,
+    });
+    const card = created.host.socket.last("card");
+    expect(card.player).toBe(0);
+    expect(card.snapshot.cards.hands[0]).toHaveLength(2);
+    const guestCard = guest.socket.last("card");
+    expect(guestCard.stateHash).toBe(card.stateHash);
+
+    const secondUid = card.snapshot.cards.hands[0][0].uid;
+    await expect(
+      service.handle(created.host.context, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "playCard",
+        matchId: created.room.matchId,
+        cardUid: secondUid,
+      }),
+    ).rejects.toThrow("本回合已经用过卡牌");
+  });
+
+  it("runs a three-player snooker room through rotation and exits", async () => {
+    const service = new RoomService(new MemoryRoomRepository());
+    const created = await createTrialRoom(service, 0, "threeSnooker");
+    const guest = context("guest", "乙");
+    await service.handle(guest.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "joinRoom",
+      roomCode: created.room.roomCode,
+      inviteToken: created.room.inviteToken,
+    });
+    const warmup = created.host.socket.last("room");
+    expect(warmup.room.status).toBe("trial");
+    expect(warmup.snapshot.playerCount).toBe(2);
+    expect(warmup.snapshot.practice).toBe(false);
+
+    const third = context("third", "丙");
+    await service.handle(third.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "joinRoom",
+      roomCode: created.room.roomCode,
+      inviteToken: created.room.inviteToken,
+    });
+    const starting = created.host.socket.last("room");
+    expect(starting.room.status).toBe("starting");
+    expect(starting.snapshot.playerCount).toBe(3);
+    await jest.advanceTimersByTimeAsync(3000);
+    const playing = created.host.socket.last("room");
+    expect(playing.room.status).toBe("playing");
+    expect(playing.snapshot.currentPlayer).toBe(0);
+    expect(playing.snapshot.scores).toEqual([0, 0, 0]);
+
+    await service.handle(created.host.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "shoot",
+      matchId: created.room.matchId,
+      shotId: "three-1",
+      input: { angle: Math.PI, power: 0.02, spinX: 0, spinY: 0, elevation: 0 },
+    });
+    const hostShot = created.host.socket.last("shot");
+    const thirdShot = third.socket.last("shot");
+    expect(hostShot.snapshot.playerCount).toBe(3);
+    expect(hostShot.stateHash).toBe(thirdShot.stateHash);
+    expect(hostShot.snapshot.currentPlayer).toBe(1);
+
+    await service.handle(guest.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "concede",
+      matchId: created.room.matchId,
+    });
+    const afterGuest = created.host.socket.last("room");
+    expect(afterGuest.room.status).toBe("playing");
+    expect(afterGuest.snapshot.eliminated[1]).toBe(true);
+
+    await service.handle(third.context, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "concede",
+      matchId: created.room.matchId,
+    });
+    const ended = created.host.socket.last("room");
+    expect(ended.room.status).toBe("gameOver");
+    expect(ended.snapshot.winner).toBe(0);
+    expect(ended.snapshot.ranking[0]).toBe(0);
+  });
+
 });

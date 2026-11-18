@@ -126,7 +126,7 @@ export function tableViewport(
 ): Rect {
   const players = options.players ?? 2;
   const side = layout.wide ? 48 : layout.compact ? 88 : 100;
-  const top = players === 3 ? 112 : 80;
+  const top = options.cards ? 128 : players === 3 ? 112 : 80;
   const bottom = 56;
   const height = options.cards ? 400 : layout.height - top - bottom;
   return fitRect(TABLE_ASPECT, {

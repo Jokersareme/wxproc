@@ -39,12 +39,15 @@ function snapshot(overrides: Partial<MatchSnapshot> = {}): MatchSnapshot {
     eliminated: [false, false],
     ranking: [],
     currentBreak: 0,
+    bestBreak: [0, 0],
+    pots: [0, 0],
     shotNumber: 0,
     target: snookerTarget(),
     balls: [ball(0), ball(8)],
     winner: null,
     endReason: null,
     lastMessage: null,
+    cards: null,
     ...overrides,
   };
 }

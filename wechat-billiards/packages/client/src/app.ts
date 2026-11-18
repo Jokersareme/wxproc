@@ -1,9 +1,13 @@
 import {
   cueBallPlacementLegal,
+  defFor,
   hashSnapshot,
   MatchEngine,
   nearestLegalCueBallPosition,
+  shotModifiers,
   tableDimensions,
+  type CardId,
+  type CardInstance,
   type GameType,
   type MatchSnapshot,
   type PhysicsEvent,
@@ -45,6 +49,8 @@ import type {
   QualityTier,
 } from "./ui/model";
 import { motion } from "./ui/theme";
+
+const R_BALL = tableDimensions().ballRadius;
 
 export interface GameAppOptions {
   serverUrl: string;
@@ -88,7 +94,11 @@ export class GameApp {
   private practiceCameraViews: CameraMode[];
   private practicePlaybackSpeed: number;
   private pendingInvitation?: { roomCode: string; inviteToken: string };
-  private pendingCreate?: GameType;
+  private pendingCreate?: {
+    gameType: GameType;
+    mode: "classic" | "cards" | "threeSnooker";
+    cardCount: number;
+  };
   private toastTimer?: ReturnType<typeof setTimeout>;
   private countdownTimer?: ReturnType<typeof setInterval>;
   private sharing = false;
@@ -109,6 +119,9 @@ export class GameApp {
   private menuStartY = 0;
   private menuStartScroll = 0;
   private menuMoved = false;
+  private practiceCardCount = 3;
+  private lastPredictionApplied = -1;
+  private lastSpinLimit = -1;
 
   constructor(
     private readonly platform: ClientPlatform,
@@ -185,6 +198,10 @@ export class GameApp {
       eventLog: [],
       eventLogOpen: false,
       foulFlashUntil: undefined,
+      spinLimit: 0.45,
+      createMode: "classic",
+      createCardCount: 3,
+      practiceCardCount: 3,
     };
     this.network = new NetworkClient(platform, options.serverUrl, {
       onMessage: (message) => this.onMessage(message),
@@ -200,9 +217,9 @@ export class GameApp {
           this.joinRoom(invitation.roomCode, invitation.inviteToken);
         }
         if (online && this.pendingCreate) {
-          const gameType = this.pendingCreate;
+          const pending = this.pendingCreate;
           this.pendingCreate = undefined;
-          this.createRoom(gameType);
+          this.createRoom(pending.gameType, pending.mode, pending.cardCount);
         }
         if (this.model.screen === "friend") this.model.message = message;
         this.redraw();
@@ -303,11 +320,31 @@ export class GameApp {
           Math.floor((Date.now() - this.opponentTurnStartedAt) / 1000),
         )
       : 0;
+    this.table.setTableMode(
+      Boolean(this.snapshot?.cards?.enabled),
+      this.snapshot?.playerCount ?? 2,
+    );
+    const modifiers = shotModifiers(
+      this.snapshot?.cards ?? null,
+      this.snapshot?.currentPlayer ?? 0,
+    );
+    this.model.spinLimit = modifiers.spinLimit;
+    const basePrediction = this.onlineMatch
+      ? this.model.predictionLevel
+      : this.practicePredictionLevel;
+    const effectivePrediction = this.snapshot?.cards?.enabled
+      ? Math.min(5, basePrediction + modifiers.predictionBonus)
+      : basePrediction;
+    if (effectivePrediction !== this.lastPredictionApplied) {
+      this.lastPredictionApplied = effectivePrediction;
+      this.table.setPredictionLevel(effectivePrediction);
+    }
     this.model.canShoot = Boolean(
       this.snapshot &&
       this.snapshot.phase === "aiming" &&
       !this.animating &&
       !this.table.cameraMoving &&
+      !this.model.cardTargetUid &&
       this.room?.status !== "starting" &&
       (!this.onlineMatch || this.snapshot.currentPlayer === this.playerIndex),
     );
@@ -359,6 +396,7 @@ export class GameApp {
       const metrics = menuMetrics(
         this.hud.layout,
         this.model.roomSettingsOpen,
+        this.practiceCardsVisible(),
       );
       if (design.y >= metrics.y) {
         this.gesture = "menuScroll";
@@ -376,6 +414,10 @@ export class GameApp {
     }
     if (action) {
       void this.action(action);
+      return;
+    }
+    if (this.model.cardTargetUid && this.model.screen === "game") {
+      this.cardTargetTouch(point);
       return;
     }
     if (this.model.homeSheet) {
@@ -444,7 +486,7 @@ export class GameApp {
       );
       this.syncAim();
     } else if (this.gesture === "spin") {
-      const spin = this.hud.spinAt(point.x, point.y);
+      const spin = this.hud.spinAt(point.x, point.y, this.model.spinLimit);
       this.model.spinX = spin.x;
       this.model.spinY = spin.y;
       this.syncAim();
@@ -454,6 +496,7 @@ export class GameApp {
       const metrics = menuMetrics(
         this.hud.layout,
         this.model.roomSettingsOpen,
+        this.practiceCardsVisible(),
       );
       this.model.menuScroll = Math.max(
         0,
@@ -579,7 +622,41 @@ export class GameApp {
       this.startPractice(action.split(":")[1] as GameType);
       return;
     }
-    if (action.startsWith("create:")) {
+    if (action.startsWith("card:")) {
+      this.openCard(action.slice("card:".length));
+      return;
+    }
+    if (action === "cardUse") {
+      this.useCard();
+    } else if (action === "cardCancel") {
+      this.closeCardUi();
+    } else if (action.startsWith("cardEffect:")) {
+      this.playCard({ targetEffectId: action.slice("cardEffect:".length) });
+    } else if (action.startsWith("practiceCardCount:")) {
+      const count = Math.max(
+        0,
+        Math.min(6, Number(action.split(":")[1]) || 0),
+      );
+      this.practiceCardCount = count;
+      this.model.practiceCardCount = count;
+      if (!this.onlineMatch && this.snapshot?.cards)
+        this.startPractice(this.snapshot.gameType, "cards", count);
+    } else if (action.startsWith("createMode:")) {
+      const mode = action.split(":")[1];
+      if (
+        mode === "classic" ||
+        mode === "cards" ||
+        mode === "threeSnooker"
+      ) {
+        this.model.createMode = mode;
+        if (mode === "threeSnooker") this.model.homeGameType = "snooker";
+      }
+    } else if (action.startsWith("createCardCount:")) {
+      this.model.createCardCount = Math.max(
+        0,
+        Math.min(6, Number(action.split(":")[1]) || 0),
+      );
+    } else if (action.startsWith("create:")) {
       this.createRoom(action.split(":")[1] as GameType);
     } else if (action === "prediction:toggle") {
       this.model.createPredictionLevel =
@@ -688,7 +765,10 @@ export class GameApp {
       if (this.onlineMatch && this.room)
         this.model.confirm = {
           action: "concedeConfirm",
-          text: "确认认输？本局判负",
+          text:
+            (this.snapshot?.playerCount ?? 2) >= 3
+              ? "确认退出本局？将跳过你的回合"
+              : "确认认输？本局判负",
         };
     } else if (action === "concedeConfirm") {
       this.model.confirm = null;
@@ -774,21 +854,42 @@ export class GameApp {
       this.homeSheetStartedAt = this.reduceMotion ? undefined : Date.now();
       this.model.homeSheetProgress = this.reduceMotion ? 1 : 0;
       this.audio.playUi("open");
-    } else if (action === "homeCards" || action === "homeThree") {
-      this.showToast("该模式将在后续版本开放");
+    } else if (action === "homeCards") {
+      this.model.homeSheet = "cards";
+      this.model.homeGameType = "eightball";
+      this.homeSheetStartedAt = this.reduceMotion ? undefined : Date.now();
+      this.model.homeSheetProgress = this.reduceMotion ? 1 : 0;
+      this.audio.playUi("open");
+    } else if (action === "homeThree") {
+      this.model.homeSheet = "three";
+      this.model.homeGameType = "snooker";
+      this.homeSheetStartedAt = this.reduceMotion ? undefined : Date.now();
+      this.model.homeSheetProgress = this.reduceMotion ? 1 : 0;
+      this.audio.playUi("open");
     } else if (action.startsWith("homeGame:")) {
       this.model.homeGameType = action.split(":")[1] as GameType;
     } else if (action === "homeStart") {
       const gameType = this.model.homeGameType;
+      const sheet = this.model.homeSheet;
       this.model.homeSheet = null;
       this.homeSheetStartedAt = undefined;
       this.model.homeSheetProgress = 1;
-      this.startPractice(gameType);
+      if (sheet === "cards")
+        this.startPractice(gameType, "cards", this.model.createCardCount);
+      else this.startPractice(gameType);
     } else if (action === "homeCreate") {
+      const sheet = this.model.homeSheet;
       this.model.homeSheet = null;
       this.homeSheetStartedAt = undefined;
       this.model.homeSheetProgress = 1;
-      this.createRoom(this.model.homeGameType);
+      if (sheet === "three") this.createRoom("snooker", "threeSnooker", 0);
+      else if (sheet === "cards")
+        this.createRoom(
+          this.model.homeGameType,
+          "cards",
+          this.model.createCardCount,
+        );
+      else this.createRoom(this.model.homeGameType);
     } else if (action === "continueRoom" && this.lastRoom) {
       if (this.model.online) this.joinRoom(this.lastRoom.roomCode, "");
       else {
@@ -855,7 +956,11 @@ export class GameApp {
         });
         this.model.message = "正在重新摆球…";
       } else {
-        this.startPractice(this.snapshot.gameType);
+        this.startPractice(
+          this.snapshot.gameType,
+          this.snapshot.cards?.enabled ? "cards" : "classic",
+          this.model.practiceCardCount,
+        );
       }
     } else if (action === "rematch" && this.room) {
       this.network.send({ type: "rematch", matchId: this.room.matchId });
@@ -882,8 +987,169 @@ export class GameApp {
     this.redraw();
   }
 
+  private practiceCardsVisible() {
+    return Boolean(
+      !this.onlineMatch &&
+        this.model.practiceMode &&
+        this.snapshot?.cards?.enabled,
+    );
+  }
+
+  private cardHand(): CardInstance[] {
+    const cards = this.snapshot?.cards;
+    if (!cards?.enabled) return [];
+    const player = this.onlineMatch
+      ? this.playerIndex
+      : (this.snapshot?.currentPlayer ?? 0);
+    return cards.hands[player] ?? [];
+  }
+
+  private openCard(uid: string) {
+    const snapshot = this.snapshot;
+    const cards = snapshot?.cards;
+    if (!snapshot || !cards?.enabled) return;
+    if (this.onlineMatch) {
+      if (this.model.roomStatus !== "playing" && this.model.roomStatus !== "trial")
+        return this.showToast("对局开始后才能使用卡牌");
+      if (snapshot.currentPlayer !== this.playerIndex)
+        return this.showToast("轮到你时才能使用");
+    }
+    if (cards.playedThisTurn) return this.showToast("本回合已经用过卡牌");
+    if (
+      cards.active.some(
+        (effect) =>
+          effect.kind === "silence" &&
+          effect.target ===
+            (this.onlineMatch ? this.playerIndex : snapshot.currentPlayer) &&
+          effect.owner !==
+            (this.onlineMatch ? this.playerIndex : snapshot.currentPlayer),
+      )
+    )
+      return this.showToast("你被沉默，下回合不能出牌");
+    if (!this.cardHand().some((card) => card.uid === uid)) return;
+    this.model.cardDetailUid = uid;
+    this.model.cardEffectPick = false;
+    this.audio.playUi("open");
+    this.redraw();
+  }
+
+  private useCard() {
+    const uid = this.model.cardDetailUid;
+    if (!uid) return;
+    const card = this.cardHand().find((entry) => entry.uid === uid);
+    if (!card) return this.closeCardUi();
+    const definition = defFor(card.cardId);
+    if (definition.target === "effect") {
+      this.model.cardEffectPick = true;
+    } else if (definition.target === "objectBall") {
+      this.model.cardTargetUid = uid;
+      this.model.cardDetailUid = undefined;
+      this.model.cardTargetBallId = undefined;
+      this.model.message =
+        definition.id === "command"
+          ? "号令：点击台面选择本杆首碰球"
+          : "移形换位：点击台面选择要移动的球";
+    } else {
+      this.playCard({});
+    }
+    this.redraw();
+  }
+
+  private closeCardUi() {
+    this.model.cardDetailUid = undefined;
+    this.model.cardTargetUid = undefined;
+    this.model.cardTargetBallId = undefined;
+    this.model.cardEffectPick = false;
+  }
+
+  private playCard(extra: {
+    targetBallId?: number;
+    targetPos?: { x: number; y: number };
+    targetEffectId?: string;
+  }) {
+    const uid = this.model.cardDetailUid ?? this.model.cardTargetUid;
+    if (!uid || !this.snapshot?.cards) return;
+    this.closeCardUi();
+    if (this.onlineMatch && this.room) {
+      this.network.send({
+        type: "playCard",
+        matchId: this.room.matchId,
+        cardUid: uid,
+        ...extra,
+      });
+      this.model.message = "等待卡牌结算…";
+    } else if (this.engine) {
+      try {
+        const result = this.engine.playCard(
+          this.snapshot.currentPlayer,
+          { cardUid: uid, ...extra },
+        );
+        this.snapshot = result.snapshot;
+        this.table.sync(result.snapshot);
+        this.model.message = result.snapshot.lastMessage ?? undefined;
+        this.showToast(result.snapshot.lastMessage ?? undefined);
+        this.audio.playUi("open");
+      } catch (error: any) {
+        this.model.message = error.message;
+        this.audio.playUi("error");
+      }
+    }
+    this.redraw();
+  }
+
+  private cardTargetTouch(point: TouchPoint) {
+    const uid = this.model.cardTargetUid;
+    const snapshot = this.snapshot;
+    if (!uid || !snapshot) return;
+    const card = this.cardHand().find((entry) => entry.uid === uid);
+    if (!card) return this.closeCardUi();
+    const definition = defFor(card.cardId);
+    const position = this.table.screenToTable(point.x, point.y);
+    if (definition.id === "shuffle") {
+      if (this.model.cardTargetBallId === undefined) {
+        const ballId = this.ballAt(position);
+        if (ballId === null)
+          return this.showToast("请点击一颗台面上的球");
+        this.model.cardTargetBallId = ballId;
+        this.model.message = "已选球，点击台面选择落点";
+        this.redraw();
+        return;
+      }
+      this.playCard({
+        targetBallId: this.model.cardTargetBallId,
+        targetPos: position,
+      });
+      return;
+    }
+    const ballId = this.ballAt(position);
+    if (ballId === null) return this.showToast("请点击一颗台面上的球");
+    this.playCard({ targetBallId: ballId });
+  }
+
+  private ballAt(position: { x: number; y: number }): number | null {
+    if (!this.snapshot) return null;
+    let best: number | null = null;
+    let bestDistance = R_BALL * 3;
+    for (const ball of this.snapshot.balls) {
+      if (ball.id === 0 || ball.state === "InPocket") continue;
+      const distance = Math.hypot(
+        ball.pos[0] - position.x,
+        ball.pos[1] - position.y,
+      );
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = ball.id;
+      }
+    }
+    return best;
+  }
+
   private canEditRoomSettings() {
-    return this.onlineMatch && Boolean(this.room) && this.playerIndex === 0;
+    return (
+      this.onlineMatch &&
+      Boolean(this.room) &&
+      (this.room?.hostPlayerIndex ?? 0) === this.playerIndex
+    );
   }
 
   private updateRoomSettings(patch: {
@@ -1000,10 +1266,14 @@ export class GameApp {
     this.redraw();
   }
 
-  private createRoom(gameType: GameType) {
+  private createRoom(
+    gameType: GameType,
+    mode: "classic" | "cards" | "threeSnooker" = this.model.createMode,
+    cardCount = this.model.createCardCount,
+  ) {
     if (this.model.creating) return;
     if (!this.model.online) {
-      this.pendingCreate = gameType;
+      this.pendingCreate = { gameType, mode, cardCount };
       this.model.message = "正在连接联机服务…";
       void this.connect();
       return;
@@ -1012,24 +1282,35 @@ export class GameApp {
     this.model.message = "正在创建房间…";
     this.network.send({
       type: "createRoom",
-      gameType,
+      gameType: mode === "threeSnooker" ? "snooker" : gameType,
       predictionLevel: this.model.createPredictionLevel,
       playbackSpeed: this.model.createPlaybackSpeed,
       cameraViews: this.model.createCameraViews,
-      mode: "classic",
-      cardCount: 0,
+      mode,
+      cardCount: mode === "cards" ? cardCount : 0,
     });
     this.redraw();
   }
 
-  private startPractice(gameType: GameType) {
+  private startPractice(
+    gameType: GameType,
+    mode: "classic" | "cards" = "classic",
+    cardCount = this.practiceCardCount,
+  ) {
     this.onlineMatch = false;
     this.room = undefined;
     this.playerIndex = 0;
+    if (mode === "cards") {
+      this.practiceCardCount = cardCount;
+      this.model.practiceCardCount = cardCount;
+    }
     this.engine = new MatchEngine({
       gameType,
       playerNames: ["你", "试玩"],
       practice: true,
+      mode,
+      cardCount,
+      seed: (Date.now() & 0x7fffffff) >>> 0,
     });
     this.snapshot = this.engine.snapshot();
     this.model.screen = "game";
@@ -1051,6 +1332,8 @@ export class GameApp {
     this.model.eventLogOpen = false;
     this.lastLoggedMessage = "";
     this.closeModals();
+    this.closeCardUi();
+    this.lastPredictionApplied = -1;
     this.table.setPresentation("game");
     this.table.setPredictionLevel(this.practicePredictionLevel);
     this.setCameraMode("top");
@@ -1061,7 +1344,17 @@ export class GameApp {
 
   private shoot() {
     if (!this.snapshot || !this.model.canShoot) return;
-    const offset = spinToCueOffset(this.model.spinX, this.model.spinY);
+    const modifiers = shotModifiers(
+      this.snapshot.cards,
+      this.snapshot.currentPlayer,
+    );
+    const offset = modifiers.spinForcedZero
+      ? { x: 0, y: 0 }
+      : spinToCueOffset(
+          this.model.spinX,
+          this.model.spinY,
+          modifiers.spinLimit,
+        );
     const input: ShotInput = {
       angle: this.angle,
       power: this.model.power,
@@ -1105,6 +1398,7 @@ export class GameApp {
     expectedHash: string,
     ruleEvents: any[],
     physicsEvents: PhysicsEvent[] = [],
+    cardEvents: { type: string; cardId?: CardId }[] = [],
   ) {
     const previousPlayer = this.snapshot?.currentPlayer;
     this.animating = true;
@@ -1129,6 +1423,10 @@ export class GameApp {
       this.table.sync(snapshot);
       const foul = ruleEvents.some((event) => event.type === "foul");
       const gameOver = ruleEvents.some((event) => event.type === "gameOver");
+      const secondLife = cardEvents.some((event) => event.type === "secondLife");
+      const shieldUsed = cardEvents.some((event) => event.type === "shieldUsed");
+      if (shieldUsed) this.showToast("护盾抵消了这次犯规");
+      if (secondLife) this.showToast("续命生效：黑八已重摆");
       if (physicsEvents.some((event) => event.type === "pot"))
         this.platform.vibrate("light");
       if (foul) {
@@ -1289,6 +1587,7 @@ export class GameApp {
             message.stateHash,
             message.ruleEvents,
             message.events,
+            message.cardEvents ?? [],
           );
         }
       } catch (error: any) {
@@ -1296,15 +1595,39 @@ export class GameApp {
         this.network.send({ type: "sync", matchId: message.matchId });
         this.model.message = `同步失败：${error.message}`;
       }
+    } else if (message.type === "card") {
+      this.room = message.room;
+      this.onlineMatch = true;
+      this.model.screen = "game";
+      this.playerIndex =
+        message.room.players.find((player) => player.userId === this.userId)
+          ?.playerIndex ?? this.playerIndex;
+      this.snapshot = message.snapshot;
+      this.engine = MatchEngine.restore(message.snapshot);
+      this.model.roomStatus = message.room.status;
+      this.applyRoomSettings(message.room);
+      this.table.setPresentation("game");
+      this.table.sync(message.snapshot);
+      this.syncAim();
+      this.closeCardUi();
+      const definition = defFor(message.cardId);
+      this.model.message =
+        message.snapshot.lastMessage ?? `已使用${definition.name}`;
+      this.showToast(`${definition.name}！`);
+      this.audio.playUi("open");
+      this.redraw();
     } else if (message.type === "opponent" && this.room) {
       const opponent = this.room.players.find(
-        (player) => player.playerIndex !== this.playerIndex,
+        (player) =>
+          message.player === undefined
+            ? player.playerIndex !== this.playerIndex
+            : player.playerIndex === message.player,
       );
       if (opponent) {
         opponent.connected = message.connected;
         this.model.message = message.connected
-          ? "对手已重新连接"
-          : "对手离线，座位已保留";
+          ? `${opponent.displayName} 已重新连接`
+          : `${opponent.displayName} 离线，座位已保留`;
         this.showToast(this.model.message);
       }
     } else if (message.type === "roomClosed") {
@@ -1339,6 +1662,7 @@ export class GameApp {
     this.model.eventLogOpen = false;
     this.model.roomSettingsOpen = false;
     this.model.roomOverlayOpen = false;
+    this.closeCardUi();
   }
 
   private menuHandlesTouch() {
@@ -1389,6 +1713,7 @@ export class GameApp {
     this.homeSheetStartedAt = undefined;
     this.model.homeSheetProgress = 1;
     this.model.settingsOpen = false;
+    this.closeCardUi();
     this.table.setPredictionLevel(0);
     this.table.cancelAnimation();
     this.showHomeTable();

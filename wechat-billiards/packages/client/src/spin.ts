@@ -8,21 +8,27 @@ import { offCenterLimit } from "../../../third_party/billiards/src/model/physics
  */
 export const SPIN_LIMIT = offCenterLimit;
 
-export function clampSpin(x: number, y: number): { x: number; y: number } {
+export function clampSpin(
+  x: number,
+  y: number,
+  limit = SPIN_LIMIT,
+): { x: number; y: number } {
   const safeX = Number.isFinite(x) ? x : 0;
   const safeY = Number.isFinite(y) ? y : 0;
+  const max = Math.max(SPIN_LIMIT, Math.min(0.65, limit));
   const length = Math.hypot(safeX, safeY);
-  if (length <= SPIN_LIMIT || length < 1e-9) {
+  if (length <= max || length < 1e-9) {
     return { x: safeX, y: safeY };
   }
-  const scale = SPIN_LIMIT / length;
+  const scale = max / length;
   return { x: safeX * scale, y: safeY * scale };
 }
 
 export function spinToCueOffset(
   spinX: number,
   spinY: number,
+  limit = SPIN_LIMIT,
 ): { x: number; y: number } {
-  const spin = clampSpin(spinX, spinY);
+  const spin = clampSpin(spinX, spinY, limit);
   return { x: -spin.x, y: -spin.y };
 }

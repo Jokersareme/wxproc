@@ -172,6 +172,8 @@ export class TableRenderer {
   private spinY = 0;
   private topView = true;
   private cameraMode: CameraMode = "top";
+  private tableCards = false;
+  private tablePlayers = 2;
   private displayMode: CameraMode = "top";
   private presentation: Presentation = "hidden";
   private quality: QualityTier;
@@ -358,6 +360,11 @@ export class TableRenderer {
     this.spinX = spinX;
     this.spinY = spinY;
     this.updateAim();
+  }
+
+  setTableMode(cards: boolean, players: number) {
+    this.tableCards = cards;
+    this.tablePlayers = players;
   }
 
   setPredictionLevel(level: number) {
@@ -1525,7 +1532,11 @@ export class TableRenderer {
       return homeVisualViewport(this.layout);
     if (this.presentation === "room")
       return roomTableViewport(this.layout);
-    if (this.presentation === "game") return designTableViewport(this.layout);
+    if (this.presentation === "game")
+      return designTableViewport(this.layout, {
+        cards: this.tableCards,
+        players: this.tablePlayers,
+      });
     return { x: 0, y: 0, width: 0, height: 0 };
   }
 

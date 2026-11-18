@@ -275,6 +275,14 @@ async function main() {
       await sleep(300);
       await screenshot(`${size.name}-home-sheet`);
       await clickButton("homeClose");
+      await clickButton("homeCards");
+      await sleep(300);
+      await screenshot(`${size.name}-home-cards`);
+      await clickButton("homeClose");
+      await clickButton("homeThree");
+      await sleep(300);
+      await screenshot(`${size.name}-home-three`);
+      await clickButton("homeClose");
       await clickButton("settings");
       await sleep(300);
       await screenshot(`${size.name}-home-settings`);
@@ -352,7 +360,44 @@ async function main() {
       await screenshot(`${size.name}-game-2p`);
 
       await evaluate(
-        "(()=>{const s=billiards.snapshot;if(!s)return;billiards.snapshot={...s,phase:'gameOver',winner:0,endReason:'对手认输',scores:[1,0]};billiards.model.online=true;billiards.redraw();})()",
+        "(()=>{const s=billiards.snapshot;if(!s)return;billiards.snapshot={...s,gameType:'snooker',playerCount:3,players:['甲','乙','丙'],scores:[10,8,4],bestBreak:[10,8,4],pots:[3,2,1],eliminated:[false,false,false],currentPlayer:1,groups:['open','open','open'],cards:null,winner:null,phase:'aiming',target:{targetIsRed:true,previousPotRed:false,freeBall:false,nominatedBall:null,respottedBlack:false,nextColour:1}};billiards.model.practiceMode=false;billiards.redraw();})()",
+      );
+      await sleep(300);
+      await screenshot(`${size.name}-game-3p`);
+      await evaluate(
+        "(()=>{const s=billiards.snapshot;if(!s)return;billiards.snapshot={...s,phase:'gameOver',winner:0,ranking:[0,1,2],endReason:'黑球落袋，本局结束'};billiards.redraw();})()",
+      );
+      await sleep(300);
+      await screenshot(`${size.name}-game-3p-over`);
+
+      await reload(size.width, size.height);
+      await clickButton("homeCards");
+      await sleep(300);
+      await clickButton("homeStart");
+      await waitFor("billiards.model.screen === 'game' && billiards.snapshot?.cards?.enabled");
+      await sleep(700);
+      await screenshot(`${size.name}-game-cards`);
+      await clickButton("menu");
+      await sleep(300);
+      await screenshot(`${size.name}-game-cards-menu`);
+      await clickButton("closeModal");
+      await evaluate(
+        "(()=>{const s=billiards.snapshot;if(!s)return;billiards.model.online=true;billiards.model.practiceMode=false;billiards.model.roomMode='cards';billiards.snapshot={...s,practice:false,players:['你','好友']};billiards.redraw();})()",
+      );
+      await sleep(300);
+      await screenshot(`${size.name}-game-cards-online`);
+      const cardPoint = await evaluate(
+        "(()=>{const b=billiards.hud.buttons.find(b=>b.id.startsWith('card:'));if(!b)return null;const l=billiards.hud.layout;return {x:(b.x+b.width/2)*(innerWidth/l.width),y:(b.y+b.height/2)*(innerHeight/l.height)};})()",
+      );
+      if (cardPoint) {
+        await click(cardPoint.x, cardPoint.y);
+        await sleep(300);
+        await screenshot(`${size.name}-game-card-detail`);
+        await clickButton("cardCancel");
+      }
+
+      await evaluate(
+        "(()=>{const s=billiards.snapshot;if(!s)return;billiards.snapshot={...s,cards:null,playerCount:2,players:['你','好友'],groups:['solids','stripes'],phase:'gameOver',winner:0,endReason:'对手认输',scores:[1,0]};billiards.model.practiceMode=false;billiards.model.online=true;billiards.redraw();})()",
       );
       await sleep(300);
       await screenshot(`${size.name}-game-over`);
@@ -398,7 +443,7 @@ async function main() {
         `页面出现异常：${JSON.stringify(cdp.exceptions.slice(0, 3))}`,
       );
     console.log(
-      `视觉验收截图完成：${sizes.length * (skipRoom ? 17 : 21)} 张，输出 ${outputDir}`,
+      `视觉验收截图完成：${sizes.length * (skipRoom ? 25 : 29)} 张，输出 ${outputDir}`,
     );
   } finally {
     cdp?.socket.close();

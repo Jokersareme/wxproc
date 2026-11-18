@@ -38,38 +38,101 @@ export function drawFriend(ui: Ui, model: HudModel) {
     model.online ? colors.sage300 : withAlpha(colors.danger400, 0.9),
     "left",
     500,
-    layout.width - margin * 2,
+    layout.width - margin * 2 - 280,
+  );
+  ui.button(
+    "join",
+    "输入房间码加入",
+    layout.width - margin - 250,
+    top + 102,
+    250,
+    56,
+    { accent: true, fontSize: 18 },
   );
 
   ui.text("创建房间", margin, top + 188, 18, colors.brass300, "left", 600);
-  const gap = 16;
-  const cardWidth = (layout.width - margin * 2 - gap * 2) / 3;
-  const cardHeight = 84;
-  const gameTypes: GameType[] = ["eightball", "nineball", "snooker"];
-  gameTypes.forEach((gameType, index) => {
-    const x = margin + index * (cardWidth + gap);
-    const disabled = !model.online || model.creating;
-    ui.button(
-      `create:${gameType}`,
-      model.creating ? "创建中…" : `创建${gameName(gameType)}房`,
-      x,
-      top + 210,
-      cardWidth,
-      cardHeight,
-      {
-        disabled,
-        fontSize: 20,
-      },
+  const modeOptions = [
+    { id: "classic", label: "经典" },
+    { id: "cards", label: "道具" },
+    { id: "threeSnooker", label: "三人" },
+  ];
+  modeOptions.forEach((option, index) => {
+    ui.pill(
+      `createMode:${option.id}`,
+      option.label,
+      layout.width - margin - (3 - index) * 86,
+      top + 172,
+      78,
+      38,
+      model.createMode === option.id,
     );
   });
 
-  const settingsY = top + 310;
+  const cardWidth = (layout.width - margin * 2 - 32) / 3;
+  if (model.createMode === "threeSnooker") {
+    ui.button(
+      "create:snooker",
+      model.creating ? "创建中…" : "创建三人斯诺克房",
+      margin,
+      top + 216,
+      layout.width - margin * 2,
+      84,
+      { disabled: !model.online || model.creating, fontSize: 20 },
+    );
+  } else {
+    const gameTypes: GameType[] = ["eightball", "nineball", "snooker"];
+    gameTypes.forEach((gameType, index) => {
+      const x = margin + index * (cardWidth + 16);
+      const disabled = !model.online || model.creating;
+      ui.button(
+        `create:${gameType}`,
+        model.creating
+          ? "创建中…"
+          : `创建${gameName(gameType)}房`,
+        x,
+        top + 216,
+        cardWidth,
+        84,
+        { disabled, fontSize: 20 },
+      );
+    });
+  }
+
+  if (model.createMode === "cards") {
+    ui.text("手牌数量", margin, top + 330, 15, colors.sage300, "left", 600);
+    const counts = [0, 1, 2, 3, 4, 5, 6];
+    counts.forEach((count, index) => {
+      ui.pill(
+        `createCardCount:${count}`,
+        String(count),
+        margin + 96 + index * 56,
+        top + 312,
+        48,
+        38,
+        model.createCardCount === count,
+      );
+    });
+    ui.text(
+      model.createCardCount === 0
+        ? "0 张 = 关闭卡牌，等价经典模式"
+        : "双方各发 N 张明牌，每回合最多 1 张",
+      margin + 96 + counts.length * 56 + 8,
+      top + 330,
+      14,
+      colors.sage500,
+      "left",
+      500,
+      layout.width - margin * 2 - 96 - counts.length * 56 - 8,
+    );
+  }
+
+  const settingsY = top + 366;
   const settingsWidth = layout.width - margin * 2;
   ui.panel(
     margin,
     settingsY,
     settingsWidth,
-    196,
+    176,
     0.82,
     radius.card,
     colors.ink800,
@@ -89,74 +152,58 @@ export function drawFriend(ui: Ui, model: HudModel) {
 
   const rowLabelX = margin + 20;
   const rowPillX = margin + 96;
-  ui.text("预测线", rowLabelX, settingsY + 66, 15, colors.ivory100, "left", 600);
+  ui.text("预测线", rowLabelX, settingsY + 62, 15, colors.ivory100, "left", 600);
   for (let level = 0; level <= 5; level += 1) {
     ui.pill(
       `prediction:${level}`,
       level === 0 ? "关闭" : `${level} 档`,
       rowPillX + level * 58,
-      settingsY + 48,
+      settingsY + 44,
       52,
       38,
       model.createPredictionLevel === level,
     );
   }
 
-  ui.text("快速播放", rowLabelX, settingsY + 112, 15, colors.ivory100, "left", 600);
+  ui.text("快速播放", rowLabelX, settingsY + 108, 15, colors.ivory100, "left", 600);
   createPlaybackOptions.forEach((option, index) => {
     ui.pill(
       `createPlayback:${option.id}`,
       option.label,
       rowPillX + index * 78,
-      settingsY + 94,
+      settingsY + 90,
       72,
       38,
       String(model.createPlaybackSpeed) === option.id,
     );
   });
 
-  ui.text("可用视角", rowLabelX, settingsY + 158, 15, colors.ivory100, "left", 600);
+  ui.text("可用视角", rowLabelX, settingsY + 154, 15, colors.ivory100, "left", 600);
   createCameraOptions.forEach((option, index) => {
     ui.pill(
       `createCameraView:${option.id}`,
       option.label,
       rowPillX + index * 112,
-      settingsY + 140,
+      settingsY + 136,
       104,
       38,
       model.createCameraViews.includes(option.id),
     );
   });
-
-  ui.panel(
-    margin,
-    top + 520,
-    layout.width - margin * 2,
-    88,
-    0.82,
-    radius.card,
-    colors.ink800,
-    withAlpha(colors.sage300, 0.18),
-  );
-  ui.text("已有房间码？", margin + 24, top + 548, 18, colors.ivory100, "left", 600);
   ui.text(
-    "输入六位数字，或粘贴好友发来的邀请链接",
-    margin + 24,
-    top + 578,
-    15,
-    colors.sage300,
-  );
-  ui.button(
-    "join",
-    "输入房间码加入",
-    layout.width - margin - 264,
-    top + 536,
-    240,
-    56,
-    { accent: true, fontSize: 18 },
+    model.createMode === "threeSnooker"
+      ? "三人房固定 3 个座位，第三人加入后 3 秒自动开局"
+      : "房间码加入自动带邀请令牌，无需再次输入",
+    margin,
+    settingsY + 204,
+    13,
+    colors.sage500,
+    "left",
+    500,
+    settingsWidth,
   );
 
-  ui.button("back", "返回大厅", margin, layout.height - bottom - 76, 220, 56, {
+  ui.button("back", "返回大厅", margin, layout.height - bottom - 70, 220, 56, {
     ghost: true,
     fontSize: 18,
   });
@@ -164,7 +211,7 @@ export function drawFriend(ui: Ui, model: HudModel) {
     ui.text(
       model.message,
       margin + 244,
-      layout.height - bottom - 48,
+      layout.height - bottom - 42,
       17,
       model.message.includes("失败") || model.message.includes("不存在")
         ? colors.danger400
@@ -174,7 +221,6 @@ export function drawFriend(ui: Ui, model: HudModel) {
       layout.width - margin * 2 - 244,
     );
 }
-
 function drawBackdrop(ui: Ui) {
   const { layout } = ui;
   const context = ui.context;
