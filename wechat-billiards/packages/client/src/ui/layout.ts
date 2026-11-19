@@ -122,19 +122,21 @@ export function fitRect(aspect: number, available: Rect): Rect {
 
 export function tableViewport(
   layout: Layout,
-  options: { cards?: boolean; players?: number } = {},
+  options: { cards?: boolean; players?: number; practice?: boolean } = {},
 ): Rect {
   const players = options.players ?? 2;
-  const side = layout.wide ? 48 : layout.compact ? 88 : 100;
-  const top = options.cards ? 128 : players === 3 ? 112 : 80;
-  const bottom = 56;
+  const side = layout.wide ? 48 : layout.compact ? 88 : 80;
+  const top =
+    players === 3 ? 112 : options.cards && !options.practice ? 128 : options.practice ? 72 : 80;
+  const bottom = 8;
   const height = layout.height - top - bottom;
-  return fitRect(TABLE_ASPECT, {
+  const fitted = fitRect(TABLE_ASPECT, {
     x: layout.safe.left + side,
     y: layout.safe.top + top,
     width: layout.width - side * 2 - layout.safe.left - layout.safe.right,
     height: Math.min(height, layout.height - top - bottom),
   });
+  return { ...fitted, y: layout.safe.top + top };
 }
 
 export function homeVisualViewport(layout: Layout): Rect {

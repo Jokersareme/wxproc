@@ -174,6 +174,7 @@ export class TableRenderer {
   private cameraMode: CameraMode = "top";
   private tableCards = false;
   private tablePlayers = 2;
+  private tablePractice = false;
   private displayMode: CameraMode = "top";
   private presentation: Presentation = "hidden";
   private quality: QualityTier;
@@ -362,9 +363,10 @@ export class TableRenderer {
     this.updateAim();
   }
 
-  setTableMode(cards: boolean, players: number) {
+  setTableMode(cards: boolean, players: number, practice: boolean) {
     this.tableCards = cards;
     this.tablePlayers = players;
+    this.tablePractice = practice;
   }
 
   setPredictionLevel(level: number) {
@@ -555,6 +557,7 @@ export class TableRenderer {
     return designTableViewport(this.layout, {
       cards: this.tableCards,
       players: this.tablePlayers,
+      practice: this.tablePractice,
     });
   }
 
@@ -1539,6 +1542,7 @@ export class TableRenderer {
       return designTableViewport(this.layout, {
         cards: this.tableCards,
         players: this.tablePlayers,
+        practice: this.tablePractice,
       });
     return { x: 0, y: 0, width: 0, height: 0 };
   }

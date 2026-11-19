@@ -331,6 +331,7 @@ export class GameApp {
     this.table.setTableMode(
       Boolean(this.snapshot?.cards?.enabled),
       this.snapshot?.playerCount ?? 2,
+      Boolean(this.snapshot?.practice),
     );
     const modifiers = shotModifiers(
       this.snapshot?.cards ?? null,

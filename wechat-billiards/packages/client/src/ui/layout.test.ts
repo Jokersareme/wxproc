@@ -78,18 +78,21 @@ describe("responsive layout", () => {
   it("keeps the game table inside the 2-player viewport", () => {
     const layout = computeLayout(1280, 720, 1);
     const rect = tableViewport(layout);
-    expect(rect.x).toBeCloseTo(100, 10);
-    expect(rect.y).toBeCloseTo(102, 10);
-    expect(rect.width).toBeCloseTo(1080, 10);
-    expect(rect.height).toBeCloseTo(540, 10);
+    expect(rect.x).toBeCloseTo(80, 10);
+    expect(rect.y).toBeCloseTo(80, 10);
+    expect(rect.width).toBeCloseTo(1120, 10);
+    expect(rect.height).toBeCloseTo(560, 10);
   });
 
   it("uses the available height in cards mode without a permanent hand tray", () => {
     const layout = computeLayout(1280, 720, 1);
     const rect = tableViewport(layout, { cards: true });
     expect(rect.y).toBeCloseTo(128, 10);
-    expect(rect.width).toBeCloseTo(1072, 10);
-    expect(rect.height).toBeCloseTo(536, 10);
+    expect(rect.width).toBeCloseTo(1120, 10);
+    expect(rect.height).toBeCloseTo(560, 10);
     expect(rect.height).toBeGreaterThan(400);
+    const practice = tableViewport(layout, { cards: true, practice: true });
+    expect(practice.y).toBeCloseTo(72, 10);
+    expect(practice.height).toBeCloseTo(560, 10);
   });
 });

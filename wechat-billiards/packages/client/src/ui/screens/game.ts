@@ -11,7 +11,6 @@ import {
   safeLeft,
   safeRight,
   safeTop,
-  tableViewport,
   type Layout,
 } from "../layout";
 import type { CameraMode, HudModel } from "../model";
@@ -41,7 +40,7 @@ export function drawGame(ui: Ui, model: HudModel) {
   const margin = layout.compact ? 84 : 104;
 
   drawTopBar(ui, model, snapshot, top, margin);
-  drawStatus(ui, model, snapshot);
+  drawStatusActions(ui, model);
   drawSliders(ui, model);
   drawActions(ui, model, snapshot);
   if (snapshot.phase !== "gameOver" && model.cardHandOpen)
@@ -106,11 +105,15 @@ function drawTopBar(
       snapshot.gameType === "snooker" && snapshot.target.freeBall
         ? targetLabel(snapshot)
         : `目标：${targetBrief(snapshot)}`;
-    const detail = trial
-      ? `${gameName(snapshot.gameType)} · ${target} · 房间 ${model.roomCode ?? "------"}`
-      : snapshot.gameType === "snooker"
-        ? `${gameName(snapshot.gameType)} · ${target} · 单杆 ${snapshot.currentBreak} 分`
-        : `${gameName(snapshot.gameType)} · ${target} · 剩余 ${remaining} 球`;
+    const status = importantStatus(model, snapshot);
+    const detail =
+      status ??
+      (trial
+        ? `${target} · 房间 ${model.roomCode ?? "------"}`
+        : snapshot.gameType === "snooker"
+          ? `${target} · 单杆 ${snapshot.currentBreak} 分`
+          : `${target} · 剩余 ${remaining} 球`);
+    const displayDetail = ui.wrap(detail, width - 150, 14, 500, 1)[0];
     ui.panel(
       x,
       top + 10,
@@ -138,7 +141,16 @@ function drawTopBar(
       "left",
       700,
     );
-    ui.text(detail, x + 60, top + 44, 14, colors.sage300, "left", 500, width - 150);
+    ui.text(
+      displayDetail,
+      x + 60,
+      top + 44,
+      14,
+      status ? statusTone(status, snapshot) : colors.sage300,
+      "left",
+      500,
+      width - 150,
+    );
     ui.text(
       `第 ${snapshot.shotNumber + 1} 杆`,
       x + width - 14,
@@ -148,6 +160,14 @@ function drawTopBar(
       "right",
       600,
     );
+    ui.buttons.push({
+      id: "eventLog",
+      label: "事件日志",
+      x,
+      y: top + 10,
+      width,
+      height,
+    });
     return;
   }
 
@@ -191,6 +211,7 @@ function drawTopBar(
   const gapRight = rightX;
   const centerX = (gapLeft + gapRight) / 2;
   const gapWidth = Math.max(80, gapRight - gapLeft - 12);
+  const status = importantStatus(model, snapshot);
   if (!snapshot.cards?.enabled) {
     ui.text(
       targetLabel(snapshot),
@@ -203,21 +224,22 @@ function drawTopBar(
       gapWidth,
     );
     ui.text(
-      `第 ${snapshot.shotNumber + 1} 杆`,
+      status ?? `第 ${snapshot.shotNumber + 1} 杆`,
       centerX,
       top + 61,
       14,
-      colors.sage500,
+      status ? statusTone(status, snapshot) : colors.sage500,
       "center",
       500,
+      gapWidth,
     );
   } else {
     ui.text(
-      `${targetLabel(snapshot)} · 第 ${snapshot.shotNumber + 1} 杆`,
+      status ?? `${targetLabel(snapshot)} · 第 ${snapshot.shotNumber + 1} 杆`,
       layout.width / 2,
       top + 94,
       layout.compact ? 15 : typeScale.body,
-      colors.ivory100,
+      status ? statusTone(status, snapshot) : colors.ivory100,
       "center",
       600,
       layout.width - margin * 2,
@@ -249,6 +271,14 @@ function drawTopBar(
       );
     });
   }
+  ui.buttons.push({
+    id: "eventLog",
+    label: "事件日志",
+    x: snapshot.cards?.enabled ? margin : gapLeft,
+    y: top + (snapshot.cards?.enabled ? 82 : 16),
+    width: snapshot.cards?.enabled ? layout.width - margin * 2 : gapWidth,
+    height: snapshot.cards?.enabled ? 32 : 64,
+  });
 }
 
 function drawThreePlayerBar(
@@ -300,15 +330,25 @@ function drawThreePlayerBar(
     600,
     layout.width - margin * 2,
   );
+  const status = importantStatus(model, snapshot);
   ui.text(
-    `轮次 ${snapshot.currentPlayer + 1}/3 · 第 ${snapshot.shotNumber + 1} 杆`,
+    status ?? `轮次 ${snapshot.currentPlayer + 1}/3 · 第 ${snapshot.shotNumber + 1} 杆`,
     layout.width / 2,
     top + 108,
     13,
-    colors.sage500,
+    status ? statusTone(status, snapshot) : colors.sage500,
     "center",
     500,
+    layout.width - margin * 2,
   );
+  ui.buttons.push({
+    id: "eventLog",
+    label: "事件日志",
+    x: margin,
+    y: top + 82,
+    width: layout.width - margin * 2,
+    height: 40,
+  });
 }
 
 function cardRarityColor(cardId: CardId) {
@@ -365,46 +405,33 @@ function drawEffectRow(
   });
 }
 
-function drawStatus(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
+function importantStatus(model: HudModel, snapshot: MatchSnapshot) {
   const waitingSeat = model.room?.players.find(
     (player) =>
       player.playerIndex === snapshot.currentPlayer && !player.connected,
   );
-  const status =
-    model.roomStatus === "playing" && waitingSeat
-      ? `等待 ${waitingSeat.displayName} 重连`
-      : model.roomStatus === "starting"
-      ? "对局即将开始 · 3 秒后开局"
-      : model.roomStatus === "trial" &&
-          model.roomMode === "threeSnooker" &&
-          (model.room?.players.length ?? 0) < 3
-        ? `三人斯诺克 · 等待第三位玩家 · 房间 ${model.roomCode ?? "------"}`
-        : model.trial && !model.animating
-          ? `试玩中 · 好友加入后自动开局 · 房间 ${model.roomCode ?? "------"}`
-        : (model.cameraMoving ? "镜头切换中" : model.message) ??
-          (snapshot.phase === "ballInHand"
-            ? "自由球：拖动白球到合法位置"
-            : snapshot.canRepositionCue
-              ? "任意球：可拖动白球调整，或点击台面瞄准"
-              : (snapshot.lastMessage ?? "单击台面瞄准，拖动调力度"));
-  const view = tableViewport(ui.layout, {
-    cards: Boolean(snapshot.cards?.enabled),
-    players: snapshot.playerCount,
-  });
-  const tableBottom = view.y + view.height;
-  const y = Math.max(
-    tableBottom + 10,
-    ui.layout.height - safeBottom(ui.layout) - 52,
-  );
-  const width = Math.min(760, ui.layout.width - 264);
-  ui.statusBar(status, statusTone(status, snapshot), y, width, "eventLog");
+  if (model.roomStatus === "playing" && waitingSeat)
+    return `等待 ${waitingSeat.displayName} 重连`;
+  if (model.roomStatus === "starting") return "对局即将开始";
+  if (model.cameraMoving) return "镜头切换中";
+  const message = model.message ?? snapshot.lastMessage;
+  if (message && message !== "自由练习：犯规后仍可摆放母球继续")
+    return message;
+  if (snapshot.phase === "ballInHand") return "自由球：拖动白球到合法位置";
+  return null;
+}
+
+function drawStatusActions(ui: Ui, model: HudModel) {
+  const x = safeLeft(ui.layout) + 24;
+  const y = ui.layout.height - safeBottom(ui.layout) - 162;
+  const width = Math.min(360, ui.layout.width / 3);
   if (model.canSkip) {
     ui.button(
       "skipShot",
       "跳过",
       Math.min(
         ui.layout.width - safeRight(ui.layout) - 100,
-        ui.layout.width / 2 + width / 2 + 12,
+        x + width + 12,
       ),
       y,
       88,
@@ -417,7 +444,7 @@ function drawStatus(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
       "邀请",
       Math.min(
         ui.layout.width - safeRight(ui.layout) - 100,
-        ui.layout.width / 2 + width / 2 + 12,
+        x + width + 12,
       ),
       y,
       88,
