@@ -230,6 +230,27 @@ async function main() {
         clickCount: 1,
       });
     };
+    const drag = async (from, to) => {
+      await cdp.call("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        ...from,
+        button: "left",
+        clickCount: 1,
+      });
+      await cdp.call("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        ...to,
+        button: "left",
+        buttons: 1,
+      });
+      await cdp.call("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        ...to,
+        button: "left",
+        clickCount: 1,
+      });
+      await sleep(150);
+    };
     const clickButton = async (id) => {
       const point = await evaluate(
         `(()=>{const b=billiards.hud.buttons.filter(b=>b.id===${JSON.stringify(id)}&&!b.disabled)[0];if(!b)return null;const l=billiards.hud.layout;return {x:(b.x+b.width/2)*(innerWidth/l.width),y:(b.y+b.height/2)*(innerHeight/l.height)};})()`,
@@ -308,6 +329,25 @@ async function main() {
       await waitFor("billiards.model.screen === 'game'");
       await sleep(900);
       await screenshot(`${size.name}-game-top`);
+      const gesturePoints = await evaluate(
+        "(()=>{const l=billiards.hud.layout,v=billiards.table.tableViewport(),p=(x,y)=>({x:x*l.scale,y:y*l.scale});const from=p(v.x+v.width/2,v.y+v.height/2);return {tap:p(v.x+v.width*.55,v.y+v.height*.65),from,to:{x:from.x+80*l.scale,y:from.y},outside:p(5,v.y+v.height/2),outsideEnd:p(v.x+40,v.y+v.height/2)};})()",
+      );
+      const angleBeforeTap = await evaluate("billiards.angle");
+      await click(gesturePoints.tap.x, gesturePoints.tap.y);
+      const angleAfterTap = await evaluate("billiards.angle");
+      if (angleAfterTap === angleBeforeTap)
+        throw new Error("台内单击没有更改瞄准方向");
+      await drag(gesturePoints.from, gesturePoints.to);
+      const angleAfterDrag = await evaluate("billiards.angle");
+      const expectedDrag = angleAfterTap + 80 * 0.003;
+      if (Math.abs(angleAfterDrag - expectedDrag) > 0.0001)
+        throw new Error(
+          `拖动瞄准不是积分滑动：${angleAfterTap} -> ${angleAfterDrag}，预期 ${expectedDrag}`,
+        );
+      await drag(gesturePoints.outside, gesturePoints.outsideEnd);
+      const angleAfterOutside = await evaluate("billiards.angle");
+      if (Math.abs(angleAfterOutside - angleAfterDrag) > 0.0001)
+        throw new Error("台外起笔错误地更改了瞄准方向");
       const hudBefore = await evaluate("billiards.hud.texture.version");
       await sleep(700);
       const hudAfter = await evaluate("billiards.hud.texture.version");
@@ -354,6 +394,13 @@ async function main() {
       await sleep(900);
       await screenshot(`${size.name}-game-overview`);
       await evaluate(
+        "billiards.startPractice('snooker');billiards.engine.state.target.freeBall=true;billiards.engine.state.target.nominatedBall=null;billiards.snapshot=billiards.engine.snapshot();billiards.redraw();",
+      );
+      await clickButton("nominate");
+      if (!(await evaluate("billiards.snapshot.target.nominatedBall")))
+        throw new Error("本地练习的提名自由球按钮没有生效");
+      await evaluate("billiards.startPractice('eightball')");
+      await evaluate(
         "(()=>{const s=billiards.snapshot;if(!s)return;billiards.snapshot={...s,practice:false,players:['你','好友'],groups:['solids','stripes'],currentPlayer:0};billiards.model.practiceMode=false;billiards.redraw();})()",
       );
       await sleep(300);
@@ -386,15 +433,27 @@ async function main() {
       );
       await sleep(300);
       await screenshot(`${size.name}-game-cards-online`);
+      if (await evaluate("billiards.hud.buttons.some(b=>b.id.startsWith('card:'))"))
+        throw new Error("手牌未收起，仍常驻在道具模式台面");
+      await clickButton("cardHand");
+      if (!(await evaluate("billiards.model.cardHandOpen")))
+        throw new Error("卡牌数量按钮没有打开手牌");
+      await screenshot(`${size.name}-game-cards-hand`);
+      const angleBeforeCardMask = await evaluate("billiards.angle");
+      await click(5, 5);
+      if (await evaluate("billiards.model.cardHandOpen"))
+        throw new Error("点击手牌遮罩没有关闭弹层");
+      if ((await evaluate("billiards.angle")) !== angleBeforeCardMask)
+        throw new Error("关闭手牌弹层误改了瞄准方向");
+      await clickButton("cardHand");
       const cardPoint = await evaluate(
         "(()=>{const b=billiards.hud.buttons.find(b=>b.id.startsWith('card:'));if(!b)return null;const l=billiards.hud.layout;return {x:(b.x+b.width/2)*(innerWidth/l.width),y:(b.y+b.height/2)*(innerHeight/l.height)};})()",
       );
-      if (cardPoint) {
-        await click(cardPoint.x, cardPoint.y);
-        await sleep(300);
-        await screenshot(`${size.name}-game-card-detail`);
-        await clickButton("cardCancel");
-      }
+      if (!cardPoint) throw new Error("手牌弹层没有可点击卡牌");
+      await click(cardPoint.x, cardPoint.y);
+      await sleep(300);
+      await screenshot(`${size.name}-game-card-detail`);
+      await clickButton("cardCancel");
 
       await evaluate(
         "(()=>{const s=billiards.snapshot;if(!s)return;billiards.snapshot={...s,cards:null,playerCount:2,players:['你','好友'],groups:['solids','stripes'],phase:'gameOver',winner:0,endReason:'对手认输',scores:[1,0]};billiards.model.practiceMode=false;billiards.model.online=true;billiards.redraw();})()",

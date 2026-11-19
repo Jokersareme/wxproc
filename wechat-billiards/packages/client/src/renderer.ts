@@ -552,7 +552,10 @@ export class TableRenderer {
   }
 
   tableViewport(): Rect {
-    return designTableViewport(this.layout);
+    return designTableViewport(this.layout, {
+      cards: this.tableCards,
+      players: this.tablePlayers,
+    });
   }
 
   requestRender() {

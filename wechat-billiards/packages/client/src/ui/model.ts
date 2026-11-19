@@ -62,6 +62,7 @@ export interface HudModel {
   eventLog: { at: number; text: string }[];
   eventLogOpen: boolean;
   foulFlashUntil?: number;
+  cardHandOpen: boolean;
   cardDetailUid?: string;
   cardTargetUid?: string;
   cardTargetBallId?: number;

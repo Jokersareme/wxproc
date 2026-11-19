@@ -83,4 +83,13 @@ describe("responsive layout", () => {
     expect(rect.width).toBeCloseTo(1080, 10);
     expect(rect.height).toBeCloseTo(540, 10);
   });
+
+  it("uses the available height in cards mode without a permanent hand tray", () => {
+    const layout = computeLayout(1280, 720, 1);
+    const rect = tableViewport(layout, { cards: true });
+    expect(rect.y).toBeCloseTo(128, 10);
+    expect(rect.width).toBeCloseTo(1072, 10);
+    expect(rect.height).toBeCloseTo(536, 10);
+    expect(rect.height).toBeGreaterThan(400);
+  });
 });

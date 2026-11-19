@@ -44,7 +44,8 @@ export function drawGame(ui: Ui, model: HudModel) {
   drawStatus(ui, model, snapshot);
   drawSliders(ui, model);
   drawActions(ui, model, snapshot);
-  if (snapshot.phase !== "gameOver") drawCardHand(ui, model, snapshot);
+  if (snapshot.phase !== "gameOver" && model.cardHandOpen)
+    drawCardHand(ui, model, snapshot);
 
   if (snapshot.phase === "gameOver") drawGameOver(ui, model, snapshot);
   if (model.spinOpen) drawSpinModal(ui, model);
@@ -391,16 +392,10 @@ function drawStatus(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
     players: snapshot.playerCount,
   });
   const tableBottom = view.y + view.height;
-  const y =
-    cardHandCount(snapshot, model) > 0
-      ? Math.max(
-          tableBottom + 8,
-          ui.layout.height - safeBottom(ui.layout) - 150 - 64,
-        )
-      : Math.max(
-          tableBottom + 10,
-          ui.layout.height - safeBottom(ui.layout) - 52,
-        );
+  const y = Math.max(
+    tableBottom + 10,
+    ui.layout.height - safeBottom(ui.layout) - 52,
+  );
   const width = Math.min(760, ui.layout.width - 264);
   ui.statusBar(status, statusTone(status, snapshot), y, width, "eventLog");
   if (model.canSkip) {
@@ -512,13 +507,24 @@ function drawActions(ui: Ui, model: HudModel, snapshot: MatchSnapshot) {
       colors.brass300,
     );
   }
+  if (snapshot.cards?.enabled) {
+    ui.button(
+      "cardHand",
+      `卡牌 · ${cardHandCount(snapshot, model)}`,
+      layout.width / 2 - 64,
+      layout.height - bottom - 96,
+      128,
+      48,
+      { ghost: true, fontSize: 16 },
+    );
+  }
   if (snapshot.target.freeBall && !snapshot.target.nominatedBall) {
     ui.button(
       "nominate",
       "提名自由球",
       layout.width / 2 - 108,
       snapshot.cards?.enabled
-        ? layout.height - bottom - 206
+        ? layout.height - bottom - 152
         : layout.height - bottom - 130,
       216,
       48,
@@ -553,6 +559,7 @@ function drawCardHand(
   const startX = (layout.width - total) / 2;
   const baseY =
     layout.height - safeBottom(layout) - 18 - cardHeight;
+  ui.mask();
   ui.panel(
     startX - 12,
     baseY - 10,

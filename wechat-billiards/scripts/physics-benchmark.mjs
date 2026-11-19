@@ -30,6 +30,8 @@ for (const shot of benchmark.freeShots) {
   );
 }
 console.log("");
+console.log(`袋角正碰出/入比：${num(benchmark.knuckleRatio, 8, 3)}`);
+console.log("");
 console.log("开球");
 for (const breakShot of benchmark.breaks) {
   console.log(

@@ -15,6 +15,11 @@ import {
   type ShotInput,
 } from "@friend-billiards/core";
 import type { RoomState, ServerMessage } from "@friend-billiards/protocol";
+import {
+  dragAimAngle,
+  isAimDrag,
+  pointInRect,
+} from "./aim";
 import { GameAudio } from "./audio";
 import { Hud, type HudModel } from "./hud";
 import { NetworkClient } from "./network";
@@ -86,6 +91,8 @@ export class GameApp {
   private angle = 0;
   private gesture: Gesture = null;
   private lastPoint?: TouchPoint;
+  private aimStartPoint?: TouchPoint;
+  private aimMoved = false;
   private lastPlacementLegal?: boolean;
   private homeSheetStartedAt?: number;
   private animating = false;
@@ -198,6 +205,7 @@ export class GameApp {
       eventLog: [],
       eventLogOpen: false,
       foulFlashUntil: undefined,
+      cardHandOpen: false,
       spinLimit: 0.45,
       createMode: "classic",
       createCardCount: 3,
@@ -461,8 +469,15 @@ export class GameApp {
         tableDimensions().ballRadius * 3;
       this.gesture =
         this.snapshot.canRepositionCue && nearCue ? "place" : "aim";
-      if (this.gesture === "aim") this.aimAt(point);
-      else {
+      if (this.gesture === "aim") {
+        const design = clientToDesign(point.x, point.y, this.hud.layout);
+        if (!pointInRect(design, this.table.tableViewport())) {
+          this.gesture = null;
+          return;
+        }
+        this.aimStartPoint = point;
+        this.aimMoved = false;
+      } else {
         this.lastPlacementLegal = undefined;
         this.touchMove(point);
       }
@@ -503,8 +518,27 @@ export class GameApp {
         Math.min(metrics.maxScroll, this.menuStartScroll - delta),
       );
       if (Math.abs(delta) > 8) this.menuMoved = true;
-    } else if (this.gesture === "aim") {
-      this.aimAt(point);
+    } else if (
+      this.gesture === "aim" &&
+      this.aimStartPoint &&
+      this.lastPoint
+    ) {
+      this.aimMoved ||= isAimDrag(
+        this.aimStartPoint,
+        point,
+        1 / this.hud.layout.scale,
+      );
+      if (this.aimMoved) {
+        this.angle = dragAimAngle(
+          this.angle,
+          this.lastPoint,
+          point,
+          1 / this.hud.layout.scale,
+        );
+        this.syncAim();
+      } else {
+        redraw = false;
+      }
     } else if (this.gesture === "place" && this.snapshot) {
       const position = this.table.screenToTable(point.x, point.y);
       const legal = cueBallPlacementLegal(
@@ -536,6 +570,9 @@ export class GameApp {
       this.menuMoved = false;
       if (!moved && pending) void this.action(pending);
       return;
+    }
+    if (this.gesture === "aim" && this.aimStartPoint && !this.aimMoved) {
+      this.aimAt(point);
     }
     if (this.gesture === "place" && this.snapshot) {
       const dropped = this.table.screenToTable(point.x, point.y);
@@ -590,6 +627,8 @@ export class GameApp {
     }
     this.gesture = null;
     this.lastPoint = undefined;
+    this.aimStartPoint = undefined;
+    this.aimMoved = false;
     this.lastPlacementLegal = undefined;
     this.model.fineAimOffset = 0;
     this.redraw();
@@ -620,6 +659,16 @@ export class GameApp {
     this.audio.playUi("tap");
     if (action.startsWith("practice:")) {
       this.startPractice(action.split(":")[1] as GameType);
+      return;
+    }
+    if (action === "cardHand") {
+      if (this.cardHand().length === 0) {
+        this.showToast("当前没有可用卡牌");
+        return;
+      }
+      this.model.cardHandOpen = !this.model.cardHandOpen;
+      this.audio.playUi(this.model.cardHandOpen ? "open" : "close");
+      this.redraw();
       return;
     }
     if (action.startsWith("card:")) {
@@ -965,13 +1014,37 @@ export class GameApp {
     } else if (action === "rematch" && this.room) {
       this.network.send({ type: "rematch", matchId: this.room.matchId });
       this.model.message = "已确认再来一局，等待对手";
-    } else if (action === "nominate" && this.room && this.snapshot) {
-      const current = this.snapshot.target.nominatedBall ?? 0;
-      this.network.send({
-        type: "nominateFreeBall",
-        matchId: this.room.matchId,
-        ballId: (current % 6) + 1,
+    } else if (action === "nominate" && this.snapshot) {
+      const snapshot = this.snapshot;
+      const current = snapshot.target.nominatedBall ?? 0;
+      const candidates = [1, 2, 3, 4, 5, 6].filter((ballId) => {
+        const ball = snapshot.balls[ballId];
+        const isCurrentTarget =
+          !snapshot.target.targetIsRed &&
+          !snapshot.target.previousPotRed &&
+          ballId === snapshot.target.nextColour;
+        return ball && ball.state !== "InPocket" && !isCurrentTarget;
       });
+      if (candidates.length === 0) return this.showToast("当前没有可提名的彩球");
+      const index = candidates.indexOf(current);
+      const ballId = candidates[(index + 1) % candidates.length];
+      if (this.onlineMatch && this.room) {
+        this.network.send({
+          type: "nominateFreeBall",
+          matchId: this.room.matchId,
+          ballId,
+        });
+      } else if (this.engine) {
+        try {
+          this.snapshot = this.engine.nominateFreeBall(ballId, this.playerIndex);
+          this.table.sync(this.snapshot);
+          this.model.message = this.snapshot.lastMessage ?? undefined;
+          this.showToast(this.model.message);
+        } catch (error: any) {
+          this.model.message = error.message;
+          this.audio.playUi("error");
+        }
+      }
     } else if (
       action === "license" ||
       action === "rules" ||
@@ -1056,6 +1129,7 @@ export class GameApp {
   }
 
   private closeCardUi() {
+    this.model.cardHandOpen = false;
     this.model.cardDetailUid = undefined;
     this.model.cardTargetUid = undefined;
     this.model.cardTargetBallId = undefined;

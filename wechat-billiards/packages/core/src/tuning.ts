@@ -5,6 +5,7 @@ import {
   setmu,
   setmuS,
 } from "../../../third_party/billiards/src/model/physics/constants";
+import { PocketGeometry } from "../../../third_party/billiards/src/view/pocketgeometry";
 import { TableConfig } from "../../../third_party/billiards/src/view/tableconfig";
 import type { GameType } from "./types";
 
@@ -29,6 +30,7 @@ export const GAME_PHYSICS = Object.freeze({
   slidingFriction: 0.2,
   cushionRestitution: 0.73,
   powerScale: 0.76,
+  cornerPocketScale: 0.85,
 });
 
 export function applyMatchTable(
@@ -36,6 +38,10 @@ export function applyMatchTable(
   tableSize = gameType === "snooker" ? 12 : 10,
 ) {
   TableConfig.apply(gameType, tableSize);
+  PocketGeometry.cornerRadius *= GAME_PHYSICS.cornerPocketScale;
+  for (const name of ["pocketNW", "pocketNE", "pocketSE", "pocketSW"]) {
+    PocketGeometry.pockets[name].pocket.radius = PocketGeometry.cornerRadius;
+  }
   setmu(GAME_PHYSICS.rollingFriction);
   setmuS(GAME_PHYSICS.slidingFriction);
   setee(GAME_PHYSICS.cushionRestitution);

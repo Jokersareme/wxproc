@@ -2,7 +2,10 @@ import { Vector3 } from "three";
 import { Ball, State } from "../../../third_party/billiards/src/model/ball";
 import { Table } from "../../../third_party/billiards/src/model/table";
 import { OutcomeType } from "../../../third_party/billiards/src/model/outcome";
+import { R } from "../../../third_party/billiards/src/model/physics/constants";
+import { Knuckle } from "../../../third_party/billiards/src/model/physics/knuckle";
 import { cueStrike } from "../../../third_party/billiards/src/model/physics/physics";
+import { PocketGeometry } from "../../../third_party/billiards/src/view/pocketgeometry";
 import { MatchEngine, PHYSICS_STEP } from "./engine";
 import { applyMatchTable, tunedMaxPower } from "./tuning";
 import type { GameType } from "./types";
@@ -40,7 +43,20 @@ export interface BreakMetric {
 export interface PhysicsBenchmark {
   freeShots: FreeShotMetric[];
   cushionRatio: number | null;
+  knuckleRatio: number;
   breaks: BreakMetric[];
+}
+
+export function runKnuckleBounce(): number {
+  applyMatchTable("eightball", 10);
+  const knuckle = PocketGeometry.pockets.pocketS.knuckleSE as Knuckle;
+  const ball = new Ball(
+    knuckle.pos.clone().add(new Vector3(0, -(R + knuckle.radius), 0)),
+  );
+  ball.vel.set(0, 1, 0);
+  const incidentSpeed = ball.vel.length();
+  knuckle.bounce(ball);
+  return ball.vel.length() / incidentSpeed;
 }
 
 export function runFreeShot(power: number): FreeShotMetric {
@@ -113,6 +129,7 @@ export function runPhysicsBenchmark(): PhysicsBenchmark {
   return {
     freeShots,
     cushionRatio: freeShots[0].cushionRatio,
+    knuckleRatio: runKnuckleBounce(),
     breaks: (["eightball", "nineball", "snooker"] as const).map((gameType) =>
       runBreak(gameType),
     ),
@@ -153,6 +170,14 @@ export function validatePhysicsBenchmark(
   ) {
     failures.push(
       `撞库出/入比 ${benchmark.cushionRatio === null ? "未测到" : benchmark.cushionRatio.toFixed(3)} 不在 ${PHYSICS_TARGETS.cushionRatioMin}–${PHYSICS_TARGETS.cushionRatioMax}`,
+    );
+  }
+  if (
+    benchmark.knuckleRatio < PHYSICS_TARGETS.cushionRatioMin ||
+    benchmark.knuckleRatio > PHYSICS_TARGETS.cushionRatioMax
+  ) {
+    failures.push(
+      `袋角正碰出/入比 ${benchmark.knuckleRatio.toFixed(3)} 不在 ${PHYSICS_TARGETS.cushionRatioMin}–${PHYSICS_TARGETS.cushionRatioMax}`,
     );
   }
   return failures;
